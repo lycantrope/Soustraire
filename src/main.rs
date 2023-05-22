@@ -9,15 +9,18 @@ fn main() -> eframe::Result<()> {
 
     let native_options = eframe::NativeOptions::default();
     eframe::run_native(
-        "eframe template",
+        "soustraire",
         native_options,
-        Box::new(|cc| Box::new(eframe_template::TemplateApp::new(cc))),
+        Box::new(|cc| Box::new(soustraire::Subtractor::new(cc))),
     )
 }
 
 // when compiling to web using trunk.
 #[cfg(target_arch = "wasm32")]
 fn main() {
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(4)
+        .build_global()?;
     // Make sure panics are logged using `console.error`.
     console_error_panic_hook::set_once();
 
@@ -30,7 +33,7 @@ fn main() {
         eframe::start_web(
             "the_canvas_id", // hardcode it
             web_options,
-            Box::new(|cc| Box::new(eframe_template::TemplateApp::new(cc))),
+            Box::new(|cc| Box::new(soustraire::Subtractor::new(cc))),
         )
         .await
         .expect("failed to start eframe");
