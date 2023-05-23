@@ -7,10 +7,11 @@ fn main() -> eframe::Result<()> {
     // Log to stdout (if you run with `RUST_LOG=debug`).
     tracing_subscriber::fmt::init();
 
-    let mut native_options = eframe::NativeOptions::default();
-    native_options.transparent = true;
-    native_options.centered = true;
-
+    let native_options = eframe::NativeOptions {
+        transparent: true,
+        centered: true,
+        ..Default::default()
+    };
     eframe::run_native(
         "soustraire",
         native_options,

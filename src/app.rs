@@ -131,11 +131,13 @@ impl Subtractor {
                             .round() as u8;
                         let mut im: image::ImageBuffer<image::Rgba<u8>, Vec<u8>> =
                             image::ImageBuffer::new(sub.width(), sub.height());
-
+                        let mut rlut: [u8; 256] = [1; 256];
+                        (0..thresh).for_each(|v| rlut[v as usize] = 0);
                         im.chunks_exact_mut(4)
-                            .zip(sub.into_iter().cloned())
+                            .zip(sub.iter().cloned())
                             .for_each(|(dst, src)| {
-                                dst[0] = if src > thresh { src } else { 255 };
+                                let r = rlut[src as usize];
+                                dst[0] = (src * r) | ((1 - r) * 255);
                                 dst[1] = src;
                                 dst[2] = src;
                                 dst[3] = 255
@@ -351,13 +353,19 @@ impl eframe::App for Subtractor {
                             let (tx, rx) = std::sync::mpsc::channel();
                             self.progress_rx.replace(rx);
                             let threshold = self.threshold;
-                            let _start = std::cmp::min(self.start, self.end);
+                            let _start = std::cmp::min(self.start, self.end).saturating_sub(1);
                             let _end = std::cmp::max(self.end, self.start);
 
                             let promise =
                                 poll_promise::Promise::spawn_thread("processing", move || {
                                     let mut stack = imagestack::ImageStack::<String>::default();
                                     stack.set_homedir(home.to_string());
+                                    stack.stacks = stack
+                                        .stacks
+                                        .into_iter()
+                                        .skip(_start)
+                                        .take(_end.saturating_sub(_start))
+                                        .collect();
                                     let csv_path = std::path::Path::new(&home).join("Area.csv");
                                     let roi_reader =
                                         std::fs::File::open(roi_path).expect("Fail to read rois");
@@ -384,7 +392,6 @@ impl eframe::App for Subtractor {
                                             .par_windows(2)
                                             .enumerate()
                                             .into_par_iter()
-                                            .filter(|(pos, _)| _start <= *pos && *pos < _end)
                                             .map_with(tx, |tx, (pos, ims)| {
                                                 let im1_p = &ims[0];
                                                 let im2_p = &ims[1];
