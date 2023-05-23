@@ -95,11 +95,11 @@ impl Subtractor {
                         let mut im: image::ImageBuffer<image::Rgba<u8>, Vec<u8>> =
                             image::ImageBuffer::new(sub.width(), sub.height());
 
-                        im.par_chunks_mut(4)
+                        im.chunks_exact_mut(4)
                             .zip(
-                                sub.into_par_iter()
+                                sub.into_iter()
                                     .cloned()
-                                    .zip(thres_sub.into_par_iter().cloned()),
+                                    .zip(thres_sub.into_iter().cloned()),
                             )
                             .for_each(|(dst, (src1, src2))| {
                                 dst[0] = src1 | (!src2);
@@ -335,7 +335,7 @@ impl eframe::App for Subtractor {
                                             .expect("fail to write csv");
                                         let n = stack.len();
                                         let pool = rayon::ThreadPoolBuilder::new()
-                                            .num_threads(num_cpus::get() / 2)
+                                            .num_threads((num_cpus::get() /2).max(1))
                                             .build()
                                             .expect("fail to create rayon pool");
 
