@@ -1,6 +1,5 @@
 use image::{ImageBuffer, Luma};
 use imageproc::filter;
-use rayon::prelude::*;
 use std::path::Path;
 
 pub fn imread_as_gray<P: AsRef<Path>>(
@@ -25,30 +24,31 @@ pub fn subtract<P: AsRef<Path>>(
     let width = im1.width();
     let height = im1.height();
 
-    let mut sub: ImageBuffer<Luma<f32>, Vec<f32>> = ImageBuffer::new(width, height);
+    let mut sub: ImageBuffer<Luma<f64>, Vec<f64>> = ImageBuffer::new(width, height);
 
-    im1.into_iter()
-    .zip(im2.into_iter())
-    .zip(sub.iter_mut())
-    .for_each(|((v1, v2), dst)| {
-        *dst = *v1 as f32 - *v2 as f32;
-    });
+    let sum = im1
+        .into_iter()
+        .zip(im2.into_iter())
+        .zip(sub.iter_mut())
+        .fold(0_f64, |acc, ((v1, v2), dst)| {
+            let delta = *v1 as f64 - *v2 as f64;
+            *dst = delta;
+            acc + delta
+        });
 
-    let sum = sub.par_iter().sum::<f32>();
-    let count = (width * height) as f32;
+    let count = (width * height) as f64;
     let mean = sum / count;
 
     let std = sub
         .iter()
         .cloned()
-        .fold(0., |acc, v|  acc + (mean - v).powi(2))
+        .fold(0., |acc, v| acc + (mean - v).powi(2))
         / count;
     // normalize to 20 times std
-    let vmin = -10f32 * std;
-    let vmax = 10f32 * std;
+    let vmin = -10f64 * std;
+    let vmax = 10f64 * std;
     let delta = vmax - vmin;
     let mut sub_norm = ImageBuffer::new(width, height);
-
     sub_norm
         .iter_mut()
         .zip(sub.into_iter())
@@ -58,7 +58,7 @@ pub fn subtract<P: AsRef<Path>>(
                 .round() as u8;
         });
 
-
-    let im_blur = filter::median_filter(&sub_norm, 5, 5);
+    // radius = 2 is equivalent to k_size = 5,
+    let im_blur = filter::median_filter(&sub_norm, 2, 2);
     Ok(im_blur)
 }

@@ -36,13 +36,12 @@ impl Roi {
         let y2 = std::cmp::min(self.height + self.y, im.height());
         let width = x2.saturating_sub(self.x);
         let height = y2.saturating_sub(self.y);
-        width * height
-            - im.view(self.x, self.y, width, height)
-                .pixels()
-                .fold(0u32, |acc, pix| {
-                    let (_, _, image::Luma([pix])) = pix;
-                    acc + (pix as u32 & 1)
-                })
+        im.view(self.x, self.y, width, height)
+            .pixels()
+            .fold(0u32, |acc, pix| {
+                let (_, _, image::Luma([pix])) = pix;
+                acc + (pix as u32 & 1)
+            })
     }
 
     fn draw_roi(&self, gray: &mut ImageBuffer<image::Rgba<u8>, Vec<u8>>, font: &Font<'_>) {
@@ -108,8 +107,12 @@ impl RoiCollection {
         subimg: &ImageBuffer<image::Luma<u8>, Vec<u8>>,
         threshold: f64,
     ) -> Option<Vec<u32>> {
-        let thresh = (128.0f64 - threshold * 12.8f64).clamp(0f64, 255f64).round() as u8;
-        let thres_im = imageproc::contrast::threshold(subimg, thresh);
+        let thresh = (127.0f64 - threshold * 12.8f64).clamp(0f64, 255f64).round() as u8;
+        let mut thres_im = imageproc::contrast::threshold(subimg, thresh);
+        // invert the byte;
+        thres_im.iter_mut().for_each(|pix| {
+            *pix = !*pix;
+        });
 
         self.rois
             .as_ref()
