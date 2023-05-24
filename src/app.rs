@@ -330,9 +330,14 @@ impl eframe::App for Subtractor {
                     .clamp_range(-10.0..=10.0),
             );
             ui.label("Start slice");
-            ui.add(widgets::DragValue::new(&mut self.start).clamp_range(0..=self.imagestack.max_slice()));
+            ui.add(
+                widgets::DragValue::new(&mut self.start)
+                    .clamp_range(0..=self.imagestack.max_slice()),
+            );
             ui.label("End slice");
-            ui.add(widgets::DragValue::new(&mut self.end).clamp_range(0..=self.imagestack.max_slice()));
+            ui.add(
+                widgets::DragValue::new(&mut self.end).clamp_range(0..=self.imagestack.max_slice()),
+            );
 
             // process block
 
@@ -380,38 +385,31 @@ impl eframe::App for Subtractor {
                                             roicol.len()
                                         ]))
                                         .expect("fail to write csv");
-                                    let pool = rayon::ThreadPoolBuilder::new()
-                                        .num_threads((num_cpus::get() / 2).max(1))
-                                        .build()
-                                        .expect("fail to create rayon pool");
 
-                                    let res_sort = pool.install(|| {
-                                        let mut res: Vec<(usize, Vec<u32>)> = stack
-                                            .stacks
-                                            .par_windows(2)
-                                            .enumerate()
-                                            .into_par_iter()
-                                            .map_with(tx, |tx, (pos, ims)| {
-                                                let im1_p = &ims[0];
-                                                let im2_p = &ims[1];
-                                                let subimg = core::subtract(im1_p, im2_p)
-                                                    .expect("failed to subtract the image");
+                                    let mut res_sort: Vec<(usize, Vec<u32>)> = stack
+                                        .stacks
+                                        .par_windows(2)
+                                        .enumerate()
+                                        .into_par_iter()
+                                        .map_with(tx, |tx, (pos, ims)| {
+                                            let im1_p = &ims[0];
+                                            let im2_p = &ims[1];
+                                            let subimg = core::subtract(im1_p, im2_p)
+                                                .expect("failed to subtract the image");
 
-                                                let res = roicol
-                                                    .measure_all(&subimg, threshold)
-                                                    .expect("fail to measure Roi");
+                                            let res = roicol
+                                                .measure_all(&subimg, threshold)
+                                                .expect("fail to measure Roi");
 
-                                                loop {
-                                                    if let Ok(()) = tx.send((pos, _end - _start)) {
-                                                        break;
-                                                    };
-                                                }
-                                                (pos, res)
-                                            })
-                                            .collect();
-                                        res.par_sort_unstable_by(|a, b| a.0.cmp(&b.0));
-                                        res
-                                    });
+                                            loop {
+                                                if let Ok(()) = tx.send((pos, _end - _start)) {
+                                                    break;
+                                                };
+                                            }
+                                            (pos, res)
+                                        })
+                                        .collect();
+                                    res_sort.par_sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
                                     res_sort.into_iter().for_each(|record| {
                                         writer.serialize(record.1).expect("");

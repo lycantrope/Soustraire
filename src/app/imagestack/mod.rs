@@ -43,7 +43,7 @@ impl<P: AsRef<Path>> ImageStack<P> {
         self.stacks.len()
     }
 
-    pub fn max_slice(&self) -> usize{
+    pub fn max_slice(&self) -> usize {
         self.stacks.len().saturating_sub(1)
     }
 

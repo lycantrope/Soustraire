@@ -24,35 +24,46 @@ pub fn subtract<P: AsRef<Path>>(
     let width = im1.width();
     let height = im1.height();
 
-    let mut sub: ImageBuffer<Luma<f64>, Vec<f64>> = ImageBuffer::new(width, height);
+    let mut sub: ImageBuffer<Luma<i16>, Vec<i16>> = ImageBuffer::new(width, height);
 
     let sum = im1
         .iter()
         .zip(im2.iter())
         .zip(sub.iter_mut())
         .fold(0_f64, |acc, ((v1, v2), dst)| {
-            let delta = *v1 as f64 - *v2 as f64;
+            let delta = *v1 as i16 - *v2 as i16;
             *dst = delta;
-            acc + delta
+            acc + delta as f64
         });
 
     let count = (width * height) as f64;
     let mean = sum / count;
 
-    let std = sub
+    let std = (sub
         .iter()
         .cloned()
-        .fold(0., |acc, v| acc + (mean - v).powi(2))
-        / count;
+        .fold(0., |acc, v| acc + (mean - v as f64).powi(2))
+        / count)
+        .sqrt();
     // normalize to 20 times std
     let vmin = -10f64 * std;
     let vmax = 10f64 * std;
     let delta = vmax - vmin;
+
+  
+    let mut lut:[u8;511] = [0;511];
+    // (0usize..512).for_each(|v|  (v as f64-255.0 - mean) - vmin  )
+    lut.iter_mut().enumerate().for_each(|(val, lut)|{
+        *lut = ((val as f64 -255.0 - vmin) / delta * 255.)
+        .clamp(0.,255.)
+        .round()
+         as u8;
+
+    });
+
     let mut sub_norm = ImageBuffer::new(width, height);
     sub_norm.iter_mut().zip(sub.iter()).for_each(|(dst, src)| {
-        *dst = ((src - mean) - vmin / delta * 255.0)
-            .clamp(0., 255.)
-            .round() as u8;
+        *dst = lut[(src+255) as usize]
     });
 
     // radius = 2 is equivalent to k_size = 5,
