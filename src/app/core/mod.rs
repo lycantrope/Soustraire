@@ -50,21 +50,19 @@ pub fn subtract<P: AsRef<Path>>(
     let vmax = 10f64 * std;
     let delta = vmax - vmin;
 
-  
-    let mut lut:[u8;511] = [0;511];
+    let mut lut: [u8; 511] = [0; 511];
     // (0usize..512).for_each(|v|  (v as f64-255.0 - mean) - vmin  )
-    lut.iter_mut().enumerate().for_each(|(val, lut)|{
-        *lut = ((val as f64 -255.0 - vmin) / delta * 255.)
-        .clamp(0.,255.)
-        .round()
-         as u8;
-
+    lut.iter_mut().enumerate().for_each(|(val, lut)| {
+        *lut = ((val as f64 - 255.0 - vmin) / delta * 255.)
+            .clamp(0., 255.)
+            .round() as u8;
     });
 
     let mut sub_norm = ImageBuffer::new(width, height);
-    sub_norm.iter_mut().zip(sub.iter()).for_each(|(dst, src)| {
-        *dst = lut[(src+255) as usize]
-    });
+    sub_norm
+        .iter_mut()
+        .zip(sub.iter())
+        .for_each(|(dst, src)| *dst = lut[(src + 255) as usize]);
 
     // radius = 2 is equivalent to k_size = 5,
     let im_blur = filter::median_filter(&sub_norm, 2, 2);

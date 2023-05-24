@@ -128,24 +128,17 @@ impl Subtractor {
 
                         let thresh = (128.0f64 - self.threshold * 12.8f64)
                             .clamp(0f64, 255f64)
-                            .round() as u8;
+                            .round() as usize;
                         let mut im: image::ImageBuffer<image::Rgba<u8>, Vec<u8>> =
                             image::ImageBuffer::new(sub.width(), sub.height());
-                        let mut rlut: [u8; 256] = [1; 256];
-                        (0..thresh).for_each(|v| rlut[v as usize] = 0);
+                        let mut rlut: [[u8; 4]; 256] = [[255; 4]; 256];
+                        (0..=255u8).for_each(|val| rlut[val as usize] = [val, val, val, 255]);
+                        (0..=thresh).for_each(|idx| rlut[idx][0] = 255);
                         im.chunks_exact_mut(4)
                             .zip(sub.iter().cloned())
                             .for_each(|(dst, src)| {
-                                let r = rlut[src as usize];
-                                dst[0] = (src * r) | ((1 - r) * 255);
-                                dst[1] = src;
-                                dst[2] = src;
-                                dst[3] = 255
+                                dst.copy_from_slice(&rlut[src as usize][0..4]);
                             });
-                        // im.pixels_mut().zip(sub.pixels()).for_each(|(dst, src)| {
-                        //     let image::Luma([val]) = src;
-                        //     *dst = image::Rgba([*val, *val, *val, 255]);
-                        // });
                         im
                     }
                     (_, _) => image::open(im_path).expect("fail to open image").to_rgba8(),
@@ -225,37 +218,39 @@ impl eframe::App for Subtractor {
                             .display()
                             .to_string(),
                     );
-                if let Some(path) = rfd::FileDialog::new()
-                    .set_directory(start_folder)
-                    .pick_folder()
+                #[cfg(not(target_arch = "wasm32"))]
                 {
-                    self.picked_path = Some(path.display().to_string());
-                    self.imagestack.set_homedir(path.display().to_string());
-                    match std::fs::File::open(path.join("Roi.json")) {
-                        Ok(fs) => {
-                            let rdr = std::io::BufReader::new(fs);
-                            self.roicol = serde_json::from_reader(rdr).unwrap_or_default();
-                        }
-                        Err(e) => eprintln!("json was not exists:{}", e),
-                    }
-                    self.start = 0;
-                    self.end = self.imagestack.max_slice();
-                    self.roicol.update_rois();
-                }
-                #[cfg(target_arch = "wasm32")]
-                {
-                    let f = async { rfd::AsyncFileDialog::new().pick_file().await };
-                    if let Some(path) = f.block_on() {
-                        self.picked_path = path.path().parent();
+                    if let Some(path) = rfd::FileDialog::new()
+                        .set_directory(start_folder)
+                        .pick_folder()
+                    {
                         self.picked_path = Some(path.display().to_string());
                         self.imagestack.set_homedir(path.display().to_string());
                         match std::fs::File::open(path.join("Roi.json")) {
                             Ok(fs) => {
-                                let n: usize = stack.len();
-
                                 let rdr = std::io::BufReader::new(fs);
-                                self.roicol = serde_json::from_reader(rdr)
-                                    .expect("fail to parse the json file");
+                                self.roicol = serde_json::from_reader(rdr).unwrap_or_default();
+                            }
+                            Err(e) => eprintln!("json was not exists:{}", e),
+                        }
+                        self.start = 0;
+                        self.end = self.imagestack.max_slice();
+                        self.roicol.update_rois();
+                    }
+                    ctx.request_repaint();
+                }
+
+                #[cfg(target_arch = "wasm32")]
+                {
+                    let f = async { rfd::AsyncFileDialog::new().pick_files().await };
+                    if let Some(files) = f.block_on() {
+                        self.picked_path = path.parent();
+                        self.picked_path = Some(path.display().to_string());
+                        self.imagestack.set_homedir(path.display().to_string());
+                        match std::fs::File::open(path.join("Roi.json")) {
+                            Ok(fs) => {
+                                let rdr = std::io::BufReader::new(fs);
+                                self.roicol = serde_json::from_reader(rdr).unwrap_or_default();
                             }
                             Err(e) => eprintln!("json was not exists:{}", e),
                         }
@@ -310,6 +305,7 @@ impl eframe::App for Subtractor {
             ) {
                 self.roicol.update_rois();
                 self.show_image(ui);
+                ctx.request_repaint();
             }
             if ui
                 .add(widgets::Checkbox::new(
@@ -345,40 +341,41 @@ impl eframe::App for Subtractor {
             if let Some(homedir) = &self.imagestack.homedir {
                 self.roicol.update_rois();
                 let roi_path = std::path::Path::new(homedir).join("Roi.json");
-                self.roicol
-                    .to_json(roi_path.clone())
-                    .expect("fail to write Roi");
+                self.roicol.to_json(roi_path).expect("fail to write Roi");
 
                 match self.processing.as_ref() {
                     None => {
                         if ui.add(widgets::Button::new("Start\nProcess")).clicked() {
                             self.counter = 0;
-                            let home = homedir.to_string();
                             let (tx, rx) = std::sync::mpsc::channel();
                             self.progress_rx.replace(rx);
                             let threshold = self.threshold;
                             let _start = std::cmp::min(self.start, self.end).saturating_sub(1);
                             let _end = std::cmp::max(self.end, self.start);
 
+                            let home = homedir.to_string();
+                            let images: Vec<_> = self
+                                .imagestack
+                                .stacks
+                                .iter()
+                                .skip(_start)
+                                .take(_end.saturating_sub(_start))
+                                .cloned()
+                                .collect();
+                            let roicol_str = serde_json::to_string(&self.roicol)
+                                .expect("fail to serialze RoiCollection");
+                            let repaint_ctx = ctx.clone();
                             let promise =
                                 poll_promise::Promise::spawn_thread("processing", move || {
-                                    let mut stack = imagestack::ImageStack::<String>::default();
-                                    stack.set_homedir(home.to_string());
-                                    stack.stacks = stack
-                                        .stacks
-                                        .into_iter()
-                                        .skip(_start)
-                                        .take(_end.saturating_sub(_start))
-                                        .collect();
                                     let csv_path = std::path::Path::new(&home).join("Area.csv");
-                                    let roi_reader =
-                                        std::fs::File::open(roi_path).expect("Fail to read rois");
-                                    let mut roicol: roi::RoiCollection =
-                                        serde_json::from_reader(roi_reader)
-                                            .expect("Fail to parser RoiCollections");
-                                    roicol.update_rois();
                                     let mut writer = csv::Writer::from_path(csv_path)
                                         .expect("fail to create file");
+
+                                    let mut roicol: roi::RoiCollection =
+                                        serde_json::from_str(&roicol_str)
+                                            .expect("Fail to parser RoiCollections");
+                                    roicol.update_rois();
+
                                     writer
                                         .write_record(&csv::StringRecord::from(vec![
                                             "Area";
@@ -386,12 +383,10 @@ impl eframe::App for Subtractor {
                                         ]))
                                         .expect("fail to write csv");
 
-                                    let mut res_sort: Vec<(usize, Vec<u32>)> = stack
-                                        .stacks
+                                    let mut res_sort: Vec<(usize, Vec<u32>)> = images
                                         .par_windows(2)
                                         .enumerate()
-                                        .into_par_iter()
-                                        .map_with(tx, |tx, (pos, ims)| {
+                                        .map_with((tx, repaint_ctx), |(tx, repaint), (pos, ims)| {
                                             let im1_p = &ims[0];
                                             let im2_p = &ims[1];
                                             let subimg = core::subtract(im1_p, im2_p)
@@ -406,6 +401,7 @@ impl eframe::App for Subtractor {
                                                     break;
                                                 };
                                             }
+                                            repaint.request_repaint();
                                             (pos, res)
                                         })
                                         .collect();
@@ -447,6 +443,7 @@ impl eframe::App for Subtractor {
                 if response.clicked_by(egui::PointerButton::Secondary) {
                     let total = self.imagestack.stacks.len();
                     self.imagestack.pos = self.imagestack.pos.saturating_add(1) % total;
+                    ctx.request_repaint();
                 }
                 self.show_image(ui);
             };
