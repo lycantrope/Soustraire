@@ -179,8 +179,8 @@ impl eframe::App for Subtractor {
     /// Called each time the UI needs repainting, which may be many times per second.
     /// Put your widgets into a `SidePanel`, `TopPanel`, `CentralPanel`, `Window` or `Area`.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let mut max_frame = self.imagestack.len().checked_sub(1).unwrap_or_default();
         TopBottomPanel::top("slider").show(ctx, |ui| {
+            let max_frame = self.imagestack.max_slice();
             let slider = widgets::Slider::new(&mut self.imagestack.pos, 0..=max_frame)
                 .text("pos")
                 .clamp_to_range(true)
@@ -238,9 +238,8 @@ impl eframe::App for Subtractor {
                         }
                         Err(e) => eprintln!("json was not exists:{}", e),
                     }
-                    max_frame = self.imagestack.len().checked_sub(1).unwrap_or_default();
                     self.start = 0;
-                    self.end = max_frame;
+                    self.end = self.imagestack.max_slice();
                     self.roicol.update_rois();
                 }
                 #[cfg(target_arch = "wasm32")]
@@ -331,9 +330,9 @@ impl eframe::App for Subtractor {
                     .clamp_range(-10.0..=10.0),
             );
             ui.label("Start slice");
-            ui.add(widgets::DragValue::new(&mut self.start).clamp_range(0..=max_frame));
+            ui.add(widgets::DragValue::new(&mut self.start).clamp_range(0..=self.imagestack.max_slice()));
             ui.label("End slice");
-            ui.add(widgets::DragValue::new(&mut self.end).clamp_range(0..=max_frame));
+            ui.add(widgets::DragValue::new(&mut self.end).clamp_range(0..=self.imagestack.max_slice()));
 
             // process block
 

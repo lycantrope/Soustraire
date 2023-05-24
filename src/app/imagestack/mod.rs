@@ -43,6 +43,10 @@ impl<P: AsRef<Path>> ImageStack<P> {
         self.stacks.len()
     }
 
+    pub fn max_slice(&self) -> usize{
+        self.stacks.len().saturating_sub(1)
+    }
+
     pub fn get_current_images(&self) -> (Option<&PathBuf>, Option<&PathBuf>) {
         (self.stacks.get(self.pos - 1), self.stacks.get(self.pos))
     }
