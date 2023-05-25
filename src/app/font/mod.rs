@@ -201,5 +201,6 @@
   See the License for the specific language governing permissions and
   limitations under the License.
 */
+use std::borrow::Cow;
 
-pub const ROBOTO_FNT: &[u8] = include_bytes!("Roboto-Bold.ttf");
+pub const ROBOTO_FNT: Cow<'_, [u8; 128676]> = Cow::Borrowed(include_bytes!("Roboto-Bold.ttf"));

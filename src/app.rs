@@ -41,7 +41,7 @@ fn configure_text_styles(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
     fonts.font_data.insert(
         "ROBOTO".to_owned(),
-        egui::FontData::from_static(font::ROBOTO_FNT),
+        egui::FontData::from_static(font::ROBOTO_FNT.as_ref()),
     );
     fonts
         .families
@@ -307,6 +307,7 @@ impl eframe::App for Subtractor {
                 self.show_image(ui);
                 ctx.request_repaint();
             }
+
             if ui
                 .add(widgets::Checkbox::new(
                     &mut self.show_subtract,

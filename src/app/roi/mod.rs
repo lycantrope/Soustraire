@@ -145,7 +145,7 @@ impl RoiCollection {
     }
 
     pub fn draw_rois(&self, gray: &mut ImageBuffer<image::Rgba<u8>, Vec<u8>>) {
-        let font = Font::try_from_bytes(ROBOTO_FNT).unwrap();
+        let font = Font::try_from_bytes(ROBOTO_FNT.as_ref()).unwrap();
 
         if let Some(rois) = self.rois.as_ref() {
             rois.iter().for_each(|roi| {
