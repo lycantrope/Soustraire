@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use eframe::egui;
 use eframe::egui::{widgets, CentralPanel, SidePanel, TopBottomPanel};
 use egui::{FontFamily, FontId, TextStyle};
@@ -91,12 +93,17 @@ impl Subtractor {
     fn get_progress(&mut self) -> (usize, usize) {
         let default = (self.imagestack.pos, self.imagestack.len());
         if let Some(rx) = &self.progress_rx {
-            if let Ok((_pos, total)) = rx.recv() {
-                self.counter += 1;
-                (self.counter, total)
-            } else {
-                self.counter = default.0;
-                default
+            let start = Instant::now();
+            loop {
+                if let Ok((_pos, total)) = rx.recv_timeout(Duration::from_millis(500)) {
+                    self.counter += 1;
+                    if start.elapsed() >= Duration::from_millis(16) {
+                        break (self.counter, total);
+                    }
+                } else {
+                    self.counter = default.0;
+                    break default;
+                }
             }
         } else {
             self.counter = default.0;
@@ -365,7 +372,6 @@ impl eframe::App for Subtractor {
                                 .collect();
                             let roicol_str = serde_json::to_string(&self.roicol)
                                 .expect("fail to serialze RoiCollection");
-                            let repaint_ctx = ctx.clone();
                             let promise =
                                 poll_promise::Promise::spawn_thread("processing", move || {
                                     let csv_path = std::path::Path::new(&home).join("Area.csv");
@@ -387,7 +393,7 @@ impl eframe::App for Subtractor {
                                     let mut res_sort: Vec<(usize, Vec<u32>)> = images
                                         .par_windows(2)
                                         .enumerate()
-                                        .map_with((tx, repaint_ctx), |(tx, repaint), (pos, ims)| {
+                                        .map_with(tx, |tx, (pos, ims)| {
                                             let im1_p = &ims[0];
                                             let im2_p = &ims[1];
                                             let subimg = core::subtract(im1_p, im2_p)
@@ -402,7 +408,6 @@ impl eframe::App for Subtractor {
                                                     break;
                                                 };
                                             }
-                                            repaint.request_repaint();
                                             (pos, res)
                                         })
                                         .collect();
