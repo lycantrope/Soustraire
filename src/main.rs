@@ -8,12 +8,13 @@ fn main() -> eframe::Result<()> {
     tracing_subscriber::fmt::init();
 
     let native_options = eframe::NativeOptions {
+        icon_data: soustraire::load_icon(),
         transparent: true,
         centered: true,
         ..Default::default()
     };
     eframe::run_native(
-        "soustraire",
+        "Soustraire",
         native_options,
         Box::new(|cc| Box::new(soustraire::Subtractor::new(cc))),
     )
