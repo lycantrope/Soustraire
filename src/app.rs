@@ -5,6 +5,7 @@ use eframe::egui::{widgets, CentralPanel, SidePanel, TopBottomPanel};
 use egui::{FontFamily, FontId, TextStyle};
 use poll_promise::Promise;
 use rayon::prelude::*;
+use std::collections::BinaryHeap;
 mod core;
 mod font;
 mod imagestack;
@@ -33,7 +34,7 @@ pub struct Subtractor {
     #[serde(skip)]
     image: Option<imagestack::Image>,
     #[serde(skip)]
-    processing: Option<Promise<()>>,
+    processing: Option<Promise<std::string::String>>,
     #[serde(skip)]
     progress_rx: Option<std::sync::mpsc::Receiver<(usize, usize)>>,
     counter: usize,
@@ -203,9 +204,16 @@ impl eframe::App for Subtractor {
                             .animate(true);
                         ui.add(progress_bar);
                     }
-                    Some(_) => {
-                        self.processing.take();
+                    Some(home) => {
                         self.progress_rx.take();
+                        if !rfd::MessageDialog::new()
+                            .set_description("Finished")
+                            .set_buttons(rfd::MessageButtons::Ok)
+                            .set_level(rfd::MessageLevel::Warning)
+                            .set_description(&format!("`Area.csv` was saved in:\n{}", home))
+                            .show()
+                        {}
+                        self.processing.take();
                     }
                 },
             }
@@ -389,34 +397,40 @@ impl eframe::App for Subtractor {
                                             roicol.len()
                                         ]))
                                         .expect("fail to write csv");
+                                    let pool = rayon::ThreadPoolBuilder::new()
+                                        .num_threads(num_cpus::get().saturating_sub(2) + 1)
+                                        .build()
+                                        .expect("Fail to build rayon threadpool");
+                                    let res_sort = pool.install(|| {
+                                        let res_sort: BinaryHeap<(usize, Vec<u32>)> = images
+                                            .par_windows(2)
+                                            .enumerate()
+                                            .map_with(tx, |tx, (pos, ims)| {
+                                                let im1_p = &ims[0];
+                                                let im2_p = &ims[1];
+                                                let subimg = core::subtract(im1_p, im2_p)
+                                                    .expect("failed to subtract the image");
 
-                                    let mut res_sort: Vec<(usize, Vec<u32>)> = images
-                                        .par_windows(2)
-                                        .enumerate()
-                                        .map_with(tx, |tx, (pos, ims)| {
-                                            let im1_p = &ims[0];
-                                            let im2_p = &ims[1];
-                                            let subimg = core::subtract(im1_p, im2_p)
-                                                .expect("failed to subtract the image");
+                                                let res = roicol
+                                                    .measure_all(&subimg, threshold)
+                                                    .expect("fail to measure Roi");
 
-                                            let res = roicol
-                                                .measure_all(&subimg, threshold)
-                                                .expect("fail to measure Roi");
-
-                                            loop {
-                                                if let Ok(()) = tx.send((pos, _end - _start)) {
-                                                    break;
-                                                };
-                                            }
-                                            (pos, res)
-                                        })
-                                        .collect();
-                                    res_sort.par_sort_unstable_by(|a, b| a.0.cmp(&b.0));
+                                                loop {
+                                                    if let Ok(()) = tx.send((pos, _end - _start)) {
+                                                        break;
+                                                    };
+                                                }
+                                                (pos, res)
+                                            })
+                                            .collect();
+                                        res_sort.into_sorted_vec()
+                                    });
 
                                     res_sort.into_iter().for_each(|record| {
                                         writer.serialize(record.1).expect("");
                                     });
                                     writer.flush().expect("fail to flush the writer");
+                                    home
                                 });
                             self.processing = Some(promise);
                         }
