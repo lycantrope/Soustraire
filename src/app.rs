@@ -6,9 +6,9 @@ use egui::{FontFamily, FontId, TextStyle};
 use poll_promise::Promise;
 use rayon::prelude::*;
 use std::collections::BinaryHeap;
-mod core;
 mod font;
 mod imagestack;
+mod process;
 mod roi;
 
 #[cfg(target_arch = "wasm32")]
@@ -132,7 +132,7 @@ impl Subtractor {
             (pre, Some(im_path)) => {
                 let mut im = match (self.show_subtract, pre) {
                     (true, Some(pre)) => {
-                        let sub = core::subtract(pre, im_path).expect("fail to to open image");
+                        let sub = process::subtract(pre, im_path).expect("fail to to open image");
 
                         let thresh = (128.0f64 - self.threshold * 12.8f64)
                             .clamp(0f64, 255f64)
@@ -204,15 +204,16 @@ impl eframe::App for Subtractor {
                             .animate(true);
                         ui.add(progress_bar);
                     }
-                    Some(home) => {
+                    Some(_home) => {
                         self.progress_rx.take();
-                        if !rfd::MessageDialog::new()
-                            .set_description("Finished")
-                            .set_buttons(rfd::MessageButtons::Ok)
-                            .set_level(rfd::MessageLevel::Warning)
-                            .set_description(&format!("`Area.csv` was saved in:\n{}", home))
-                            .show()
-                        {}
+                        // the window did not popup
+                        // if !rfd::MessageDialog::new()
+                        //     .set_description("Finished")
+                        //     .set_buttons(rfd::MessageButtons::Ok)
+                        //     .set_level(rfd::MessageLevel::Warning)
+                        //     .set_description(&format!("`Area.csv` was saved in:\n{}", home))
+                        //     .show()
+                        // {}
                         self.processing.take();
                     }
                 },
@@ -401,6 +402,7 @@ impl eframe::App for Subtractor {
                                         .num_threads(num_cpus::get().saturating_sub(2) + 1)
                                         .build()
                                         .expect("Fail to build rayon threadpool");
+
                                     let res_sort = pool.install(|| {
                                         let res_sort: BinaryHeap<(usize, Vec<u32>)> = images
                                             .par_windows(2)
@@ -408,7 +410,7 @@ impl eframe::App for Subtractor {
                                             .map_with(tx, |tx, (pos, ims)| {
                                                 let im1_p = &ims[0];
                                                 let im2_p = &ims[1];
-                                                let subimg = core::subtract(im1_p, im2_p)
+                                                let subimg = process::subtract(im1_p, im2_p)
                                                     .expect("failed to subtract the image");
 
                                                 let res = roicol
