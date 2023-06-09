@@ -19,6 +19,11 @@ git clone https://github.com/lycantrope/soustraire
 cargo run --release
 ```
 
+### 4. [Optional] Build with simd optiomization by LLVM (Intel AVX2/AVX-512)
+```shell
+RUSTFLAGS='-C target-feature=+avx' cargo build --release
+```
+
 ###
 ## Algorithm
 
