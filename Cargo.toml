@@ -3,7 +3,7 @@ name = "soustraire"
 version = "0.1.0"
 authors = ["Chung-Kuan Chen <b97b01045@gmail.com>"]
 edition = "2021"
-rust-version = "1.65"
+rust-version = "1.69"
 
 
 [dependencies]

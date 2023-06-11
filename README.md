@@ -1,5 +1,6 @@
 # Soustraire is a Rust implementation for Remi imagesubtractor.
 **Warning** 
+> ** The poll-promise compiled with Rust 1.70 cause UB in promise.ready()**. Waiting for the fixed of poll-promise.   
 > Current application was failed to compile into WASM.
 ## How to install
 ### 1. install [Rust](https://www.rust-lang.org/ja/tools/install)
@@ -20,10 +21,18 @@ cargo run --release
 ```
 
 ### 4. [Optional] Build with simd optiomization by LLVM (Intel AVX2/AVX-512)
+
+- MacOS/Linux
 ```shell
 RUSTFLAGS='-C target-feature=+avx' cargo build --release
 ```
-
+- Windows
+```powershell
+set RUSTFLAGS -C target-feature=+avx    
+```
+```
+cargo build --release
+```
 ###
 ## Algorithm
 

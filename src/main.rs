@@ -11,6 +11,7 @@ fn main() -> eframe::Result<()> {
         icon_data: soustraire::load_icon(),
         transparent: true,
         centered: true,
+        follow_system_theme:false,
         ..Default::default()
     };
     eframe::run_native(
