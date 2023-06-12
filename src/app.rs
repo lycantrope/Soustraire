@@ -454,19 +454,17 @@ impl eframe::App for Subtractor {
                     )
                 });
                 let response = ui.add(widgets::ImageButton::new(texture, texture.size_vec2()));
+                let total = self.imagestack.stacks.len();
+                let pos = self.imagestack.pos;
                 if response.clicked_by(egui::PointerButton::Primary) {
-                    let total = self.imagestack.stacks.len();
-                    self.imagestack.pos = self
-                        .imagestack
-                        .pos
-                        .checked_sub(1)
-                        .unwrap_or(total.saturating_sub(1));
-                }
-                if response.clicked_by(egui::PointerButton::Secondary) {
-                    let total = self.imagestack.stacks.len();
-                    self.imagestack.pos = self.imagestack.pos.saturating_add(1) % total;
+                    self.imagestack.pos = (pos - 1) % total;
                     ctx.request_repaint();
                 }
+                if response.clicked_by(egui::PointerButton::Secondary) {
+                    self.imagestack.pos = (pos + 1) % total;
+                    ctx.request_repaint();
+                }
+
                 self.show_image(ui);
             };
         });
