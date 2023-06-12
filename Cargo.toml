@@ -43,7 +43,8 @@ poll-promise = { version = "0.2.0", features = ["web"] }
 
 
 [profile.release]
-opt-level = 2 # fast and small wasm
+opt-level = 3 # fast and small wasm
+panic = "abort"
 
 # Optimize all dependencies even in debug builds:
 [profile.dev.package."*"]
