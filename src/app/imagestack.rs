@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use eframe::egui;
+use rayon::slice::ParallelSliceMut;
 
 #[derive(serde::Serialize, serde::Deserialize, Default)]
 pub struct Image {
@@ -32,7 +33,7 @@ impl<P: AsRef<Path>> ImageStack<P> {
                     None => false,
                     Some(paths) => {
                         self.stacks.extend(paths.filter_map(|p| p.ok()));
-                        self.stacks.sort_unstable();
+                        self.stacks.par_sort_unstable();
                         true
                     }
                 }
