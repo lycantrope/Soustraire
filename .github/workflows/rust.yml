@@ -7,6 +7,7 @@ env:
   # https://rustwasm.github.io/wasm-bindgen/api/web_sys/struct.Clipboard.html
   # https://rustwasm.github.io/docs/wasm-bindgen/web-sys/unstable-apis.html
   RUSTFLAGS: --cfg=web_sys_unstable_apis
+  
 
 jobs:
   check:
@@ -21,6 +22,7 @@ jobs:
           override: true
       - uses: actions-rs/cargo@v1
         with:
+          pacakges: librust-atk-dev
           command: check
           args: --all-features
 
@@ -52,6 +54,7 @@ jobs:
           override: true
       - uses: actions-rs/cargo@v1
         with:
+          packages: gdk-sys
           command: test
           args: --lib
 
