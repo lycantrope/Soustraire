@@ -25,20 +25,18 @@ impl<P: AsRef<Path>> ImageStack<P> {
         self.glob()
     }
     fn glob(&mut self) -> bool {
-        match &self.homedir {
-            None => false,
-            Some(homedir) => {
+        self.homedir
+            .as_ref()
+            .and_then(|homedir| {
                 let pattern = homedir.as_ref().join("*.jpg").display().to_string();
-                match glob::glob(&pattern).ok() {
-                    None => false,
-                    Some(paths) => {
+                glob::glob(&pattern)
+                    .map(|paths| {
                         self.stacks.extend(paths.filter_map(|p| p.ok()));
-                        self.stacks.par_sort_unstable();
-                        true
-                    }
-                }
-            }
-        }
+                        self.stacks.par_sort_unstable()
+                    })
+                    .ok()
+            })
+            .is_some()
     }
     pub fn len(&self) -> usize {
         self.stacks.len()

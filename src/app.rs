@@ -145,7 +145,7 @@ impl Subtractor {
                         im.chunks_exact_mut(4)
                             .zip(sub.iter().cloned())
                             .for_each(|(dst, src)| {
-                                dst.copy_from_slice(&rlut[src as usize][0..4]);
+                                dst.copy_from_slice(rlut[src as usize].as_slice());
                             });
                         im
                     }
@@ -194,9 +194,8 @@ impl eframe::App for Subtractor {
         TopBottomPanel::bottom("progress_bar").show(ctx, |ui| {
             let (pos, total) = self.get_progress();
             ui.label(format!("{}/{}", pos, total));
-            match self.processing.as_ref() {
-                None => {}
-                Some(promise) => match promise.ready() {
+            if let Some(promise) = self.processing.as_ref() {
+                match promise.ready() {
                     None => {
                         let progress = pos as f32 / total as f32;
                         let progress_bar = egui::ProgressBar::new(progress)
@@ -206,36 +205,23 @@ impl eframe::App for Subtractor {
                     }
                     Some(_home) => {
                         self.progress_rx.take();
-                        // the window did not popup
-                        // if !rfd::MessageDialog::new()
-                        //     .set_description("Finished")
-                        //     .set_buttons(rfd::MessageButtons::Ok)
-                        //     .set_level(rfd::MessageLevel::Warning)
-                        //     .set_description(&format!("`Area.csv` was saved in:\n{}", home))
-                        //     .show()
-                        // {}
                         self.processing.take();
                     }
-                },
+                }
             }
         });
 
         SidePanel::left("control").show(ctx, |ui| {
             if ui.button("Open data folder").clicked() {
                 #[cfg(not(target_arch = "wasm32"))]
-                let start_folder = self
-                    .imagestack
-                    .homedir
-                    .as_ref()
-                    .map(|p| p.to_string())
-                    .unwrap_or(
-                        dirs::home_dir()
-                            .expect("fail to find your home directory")
-                            .display()
-                            .to_string(),
-                    );
-                #[cfg(not(target_arch = "wasm32"))]
                 {
+                    let start_folder = self
+                        .imagestack
+                        .homedir
+                        .as_ref()
+                        .cloned()
+                        .or_else(|| dirs::home_dir().map(|v| v.display().to_string()))
+                        .expect("fail to set your home directory");
                     if let Some(path) = rfd::FileDialog::new()
                         .set_directory(start_folder)
                         .pick_folder()
@@ -357,89 +343,79 @@ impl eframe::App for Subtractor {
             ui.separator();
             if let Some(homedir) = &self.imagestack.homedir {
                 self.roicol.update_rois();
-                let roi_path = std::path::Path::new(homedir).join("Roi.json");
-                self.roicol.to_json(roi_path).expect("fail to write Roi");
 
-                match self.processing.as_ref() {
-                    None => {
-                        if ui.add(widgets::Button::new("Start\nProcess")).clicked() {
-                            self.counter = 0;
-                            let (tx, rx) = std::sync::mpsc::channel();
-                            self.progress_rx.replace(rx);
-                            let threshold = self.threshold;
-                            let _start = std::cmp::min(self.start, self.end).saturating_sub(1);
-                            let _end = std::cmp::max(self.end, self.start);
+                if self.processing.is_some() {
+                    ui.label(format!("Processing the data in: {}", homedir.to_owned()));
+                } else if ui.add(widgets::Button::new("Start\nProcess")).clicked() {
+                    let roi_path = std::path::Path::new(homedir).join("Roi.json");
+                    self.roicol.to_json(roi_path).expect("fail to write Roi");
+                    self.counter = 0;
+                    let (tx, rx) = std::sync::mpsc::channel();
+                    self.progress_rx.replace(rx);
+                    let threshold = self.threshold;
+                    let _start = std::cmp::min(self.start, self.end).saturating_sub(1);
+                    let _end = std::cmp::max(self.end, self.start);
 
-                            let home = homedir.to_string();
-                            let images: Vec<_> = self
-                                .imagestack
-                                .stacks
-                                .iter()
-                                .skip(_start)
-                                .take(_end.saturating_sub(_start))
-                                .cloned()
+                    let home = homedir.to_string();
+                    let images: Vec<_> = self
+                        .imagestack
+                        .stacks
+                        .iter()
+                        .skip(_start)
+                        .take(_end.saturating_sub(_start))
+                        .cloned()
+                        .collect();
+                    let roicol_str = serde_json::to_string(&self.roicol)
+                        .expect("fail to serialze RoiCollection");
+                    let promise = poll_promise::Promise::spawn_thread("processing", move || {
+                        let csv_path = std::path::Path::new(&home).join("Area.csv");
+                        let mut writer =
+                            csv::Writer::from_path(csv_path).expect("fail to create file");
+
+                        let mut roicol: roi::RoiCollection = serde_json::from_str(&roicol_str)
+                            .expect("Fail to parser RoiCollections");
+                        roicol.update_rois();
+
+                        writer
+                            .write_record(&csv::StringRecord::from(vec!["Area"; roicol.len()]))
+                            .expect("fail to write csv");
+                        let pool = rayon::ThreadPoolBuilder::new()
+                            .num_threads(num_cpus::get().saturating_sub(2) + 1)
+                            .build()
+                            .expect("Fail to build rayon threadpool");
+
+                        let res_sort = pool.install(|| {
+                            let res_sort: BinaryHeap<(usize, Vec<u32>)> = images
+                                .par_windows(2)
+                                .enumerate()
+                                .map_with(tx, |tx, (pos, ims)| {
+                                    let im1_p = &ims[0];
+                                    let im2_p = &ims[1];
+                                    let subimg = process::subtract(im1_p, im2_p)
+                                        .expect("failed to subtract the image");
+
+                                    let res = roicol
+                                        .measure_all(&subimg, threshold)
+                                        .expect("fail to measure Roi");
+
+                                    loop {
+                                        if let Ok(()) = tx.send((pos, _end - _start)) {
+                                            break;
+                                        };
+                                    }
+                                    (pos, res)
+                                })
                                 .collect();
-                            let roicol_str = serde_json::to_string(&self.roicol)
-                                .expect("fail to serialze RoiCollection");
-                            let promise =
-                                poll_promise::Promise::spawn_thread("processing", move || {
-                                    let csv_path = std::path::Path::new(&home).join("Area.csv");
-                                    let mut writer = csv::Writer::from_path(csv_path)
-                                        .expect("fail to create file");
+                            res_sort.into_sorted_vec()
+                        });
 
-                                    let mut roicol: roi::RoiCollection =
-                                        serde_json::from_str(&roicol_str)
-                                            .expect("Fail to parser RoiCollections");
-                                    roicol.update_rois();
-
-                                    writer
-                                        .write_record(&csv::StringRecord::from(vec![
-                                            "Area";
-                                            roicol.len()
-                                        ]))
-                                        .expect("fail to write csv");
-                                    let pool = rayon::ThreadPoolBuilder::new()
-                                        .num_threads(num_cpus::get().saturating_sub(2) + 1)
-                                        .build()
-                                        .expect("Fail to build rayon threadpool");
-
-                                    let res_sort = pool.install(|| {
-                                        let res_sort: BinaryHeap<(usize, Vec<u32>)> = images
-                                            .par_windows(2)
-                                            .enumerate()
-                                            .map_with(tx, |tx, (pos, ims)| {
-                                                let im1_p = &ims[0];
-                                                let im2_p = &ims[1];
-                                                let subimg = process::subtract(im1_p, im2_p)
-                                                    .expect("failed to subtract the image");
-
-                                                let res = roicol
-                                                    .measure_all(&subimg, threshold)
-                                                    .expect("fail to measure Roi");
-
-                                                loop {
-                                                    if let Ok(()) = tx.send((pos, _end - _start)) {
-                                                        break;
-                                                    };
-                                                }
-                                                (pos, res)
-                                            })
-                                            .collect();
-                                        res_sort.into_sorted_vec()
-                                    });
-
-                                    res_sort.into_iter().for_each(|record| {
-                                        writer.serialize(record.1).expect("");
-                                    });
-                                    writer.flush().expect("fail to flush the writer");
-                                    home
-                                });
-                            self.processing = Some(promise);
-                        }
-                    }
-                    Some(_) => {
-                        ui.label(format!("Processing the data in: {}", homedir.to_owned()));
-                    }
+                        res_sort.into_iter().for_each(|record| {
+                            writer.serialize(record.1).expect("");
+                        });
+                        writer.flush().expect("fail to flush the writer");
+                        home
+                    });
+                    self.processing = Some(promise);
                 }
             }
         });
