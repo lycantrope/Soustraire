@@ -275,15 +275,16 @@ impl eframe::App for Subtractor {
             ui.separator();
             // roicol collections
             ui.label("Parameters of Region of interest(ROI)");
+            ui.add_space(6.);
             let roi_labels: [&'static str; 9] = [
-                "Number of column",
-                "number of row",
-                "x coordinate",
-                "y coordinate",
-                "x interval of ROI",
-                "y interval of ROI",
-                "ROI width",
-                "ROI height",
+                "Number of Column",
+                "Number of Row",
+                "X Coordinate",
+                "Y Coordinate",
+                "X Interval of ROI",
+                "Y Interval of ROI",
+                "ROI Width",
+                "ROI Height",
                 "Rotate",
             ];
             let rois_widgets: Vec<widgets::DragValue<'_>> = vec![
