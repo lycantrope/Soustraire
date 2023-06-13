@@ -274,7 +274,7 @@ impl eframe::App for Subtractor {
 
             ui.separator();
             // roicol collections
-            ui.label("Parameters of Region of interest(ROI)");
+            ui.label("Parameters of Region of Interest(ROI)");
             ui.add_space(6.);
             let roi_labels: [&'static str; 9] = [
                 "Number of Column",

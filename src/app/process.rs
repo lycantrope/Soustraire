@@ -18,7 +18,7 @@ fn _imread<P: AsRef<Path>>(
 pub fn subtract<P: AsRef<Path>>(
     img1_path: P,
     img2_path: P,
-) -> Result<ImageBuffer<Luma<u8>, Vec<u8>>, Box<dyn std::error::Error>> {
+) -> Result<ImageBuffer<Luma<u8>, Vec<u8>>, image::ImageError> {
     let im1 = imread_as_gray(img1_path)?;
     let im2 = imread_as_gray(img2_path)?;
     let width = im1.width();
@@ -30,11 +30,11 @@ pub fn subtract<P: AsRef<Path>>(
         .iter()
         .zip(im2.iter())
         .zip(sub.iter_mut())
-        .fold(0_f64, |acc, ((v1, v2), dst)| {
+        .fold(0_i64, |acc, ((v1, v2), dst)| {
             let delta = *v1 as i16 - *v2 as i16;
             *dst = delta;
-            acc + delta as f64
-        });
+            acc + delta as i64
+        }) as f64;
 
     let count = (width * height) as f64;
     let mean = sum / count;
@@ -52,11 +52,13 @@ pub fn subtract<P: AsRef<Path>>(
 
     let mut lut: [u8; 511] = [0; 511];
     // (0usize..512).for_each(|v|  (v as f64-255.0 - mean) - vmin  )
-    lut.iter_mut().enumerate().for_each(|(val, lut)| {
-        *lut = ((val as f64 - 255.0 - vmin) / delta * 255.)
-            .clamp(0., 255.)
-            .round() as u8;
-    });
+    if delta.is_normal() {
+        lut.iter_mut().enumerate().for_each(|(val, lut)| {
+            *lut = ((val as f64 - 255.0 - vmin) / delta * 255.)
+                .clamp(0., 255.)
+                .round() as u8;
+        });
+    }
 
     let mut sub_norm = ImageBuffer::new(width, height);
     sub_norm
