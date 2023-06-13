@@ -22,7 +22,7 @@ jobs:
           override: true
       - uses: actions-rs/cargo@v1
         with:
-          pacakges: librust-atk-dev
+          packages: librust-atk-dev, gdk-sys, gtk
           command: check
           args: --all-features
 
@@ -54,7 +54,7 @@ jobs:
           override: true
       - uses: actions-rs/cargo@v1
         with:
-          packages: gdk-sys
+          packages: librust-atk-dev, gdk-sys, gtk
           command: test
           args: --lib
 
@@ -82,6 +82,7 @@ jobs:
       - run: rustup component add clippy
       - uses: actions-rs/clippy-check@v1
         with:
+          packages: librust-atk-dev, gdk-sys, gtk
           token: ${{ secrets.GITHUB_TOKEN }}
           args: --all-features
   # trunk:
