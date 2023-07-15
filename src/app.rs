@@ -5,7 +5,8 @@ use eframe::egui::{widgets, CentralPanel, SidePanel, TopBottomPanel};
 use egui::{FontFamily, FontId, TextStyle};
 use poll_promise::Promise;
 use rayon::prelude::*;
-use std::collections::BinaryHeap;
+use std::sync::Arc;
+
 mod font;
 mod imagestack;
 mod process;
@@ -212,7 +213,7 @@ impl eframe::App for Subtractor {
         });
 
         SidePanel::left("control").show(ctx, |ui| {
-            if ui.button("Open data folder").clicked() {
+            if self.processing.as_ref().is_none() && ui.button("Open data folder").clicked() {
                 #[cfg(not(target_arch = "wasm32"))]
                 {
                     let start_folder = self
@@ -358,16 +359,12 @@ impl eframe::App for Subtractor {
                     let _end = std::cmp::max(self.end, self.start);
 
                     let home = homedir.to_string();
-                    let images: Vec<_> = self
-                        .imagestack
-                        .stacks
-                        .iter()
-                        .skip(_start)
-                        .take(_end.saturating_sub(_start))
-                        .cloned()
-                        .collect();
+                      
+                        
+                    let images = Arc::clone(&self.imagestack.stacks);
                     let roicol_str = serde_json::to_string(&self.roicol)
                         .expect("fail to serialze RoiCollection");
+
                     let promise = poll_promise::Promise::spawn_thread("processing", move || {
                         let csv_path = std::path::Path::new(&home).join("Area.csv");
                         let mut writer =
@@ -384,14 +381,14 @@ impl eframe::App for Subtractor {
                             .num_threads(num_cpus::get().saturating_sub(2) + 1)
                             .build()
                             .expect("Fail to build rayon threadpool");
-
+                        
                         let res_sort = pool.install(|| {
-                            let res_sort: BinaryHeap<(usize, Vec<u32>)> = images
-                                .par_windows(2)
+                            let mut res_sort: Vec<(usize, Vec<u32>)> = (_start.._end)
+                                .into_par_iter()
                                 .enumerate()
-                                .map_with(tx, |tx, (pos, ims)| {
-                                    let im1_p = &ims[0];
-                                    let im2_p = &ims[1];
+                                .map_with(tx, |tx, (pos, idx)| {
+                                    let im1_p = &images[idx];
+                                    let im2_p = &images[idx+1];
                                     let subimg = process::subtract(im1_p, im2_p)
                                         .expect("failed to subtract the image");
 
@@ -407,7 +404,8 @@ impl eframe::App for Subtractor {
                                     (pos, res)
                                 })
                                 .collect();
-                            res_sort.into_sorted_vec()
+                            res_sort.par_sort_unstable_by(|a, b| a.0.cmp(&b.0));
+                            res_sort
                         });
 
                         res_sort.into_iter().for_each(|record| {
