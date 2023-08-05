@@ -31,6 +31,8 @@ pub struct Subtractor {
     start: usize,
     #[serde(skip)]
     end: usize,
+    #[serde(skip)]
+    step:usize,
 
     #[serde(skip)]
     image: Option<imagestack::Image>,
@@ -323,6 +325,7 @@ impl eframe::App for Subtractor {
             }
 
             // show subtract
+            let maxslice = self.imagestack.max_slice();
             ui.separator();
             ui.label("Binarized threshold (default: 2.0 x std)");
             ui.add(
@@ -333,11 +336,16 @@ impl eframe::App for Subtractor {
             ui.label("Start slice");
             ui.add(
                 widgets::DragValue::new(&mut self.start)
-                    .clamp_range(0..=self.imagestack.max_slice()),
+                    .clamp_range(0..=maxslice),
             );
             ui.label("End slice");
             ui.add(
-                widgets::DragValue::new(&mut self.end).clamp_range(0..=self.imagestack.max_slice()),
+                widgets::DragValue::new(&mut self.end).clamp_range(0..=maxslice),
+            );
+
+            ui.label("Frame step");
+            ui.add(
+                widgets::DragValue::new(&mut self.step).clamp_range(1..=maxslice.saturating_sub(1).max(1)),
             );
 
             // process block
@@ -348,6 +356,8 @@ impl eframe::App for Subtractor {
 
                 if self.processing.is_some() {
                     ui.label(format!("Processing the data in: {}", homedir.to_owned()));
+                } else if self.imagestack.max_slice() <= self.step{
+                    ui.label("Cannot processing the imagestack if step size is greater than total frame!!");
                 } else if ui.add(widgets::Button::new("Start\nProcess")).clicked() {
                     let roi_path = std::path::Path::new(homedir).join("Roi.json");
                     self.roicol.to_json(roi_path).expect("fail to write Roi");
@@ -355,8 +365,10 @@ impl eframe::App for Subtractor {
                     let (tx, rx) = std::sync::mpsc::channel();
                     self.progress_rx.replace(rx);
                     let threshold = self.threshold;
-                    let _start = std::cmp::min(self.start, self.end).saturating_sub(1);
+                    let _step = self.step;
+                    let _start = std::cmp::min(self.start, self.end).saturating_sub(_step);
                     let _end = std::cmp::max(self.end, self.start);
+
 
                     let home = homedir.to_string();
                       
@@ -385,10 +397,16 @@ impl eframe::App for Subtractor {
                         let res_sort = pool.install(|| {
                             let mut res_sort: Vec<(usize, Vec<u32>)> = (_start.._end)
                                 .into_par_iter()
+                                .step_by(_step)
                                 .enumerate()
-                                .map_with(tx, |tx, (pos, idx)| {
-                                    let im1_p = &images[idx];
-                                    let im2_p = &images[idx+1];
+                                .filter_map(|(pos, idx)|{
+                                        if let (Some(im1), Some(im2)) = (&images.get(idx), &images.get(idx+_step)){
+                                            Some((pos, *im1, *im2))
+                                        } else{
+                                            None
+                                        }
+                                })
+                                .map_with(tx, |tx, (pos, im1_p, im2_p)| {
                                     let subimg = process::subtract(im1_p, im2_p)
                                         .expect("failed to subtract the image");
 
@@ -397,7 +415,7 @@ impl eframe::App for Subtractor {
                                         .expect("fail to measure Roi");
 
                                     loop {
-                                        if let Ok(()) = tx.send((pos, _end - _start)) {
+                                        if let Ok(()) = tx.send((pos, (_end - _start)/_step)) {
                                             break;
                                         };
                                     }
@@ -432,11 +450,11 @@ impl eframe::App for Subtractor {
                 let total = self.imagestack.stacks.len();
                 let pos = self.imagestack.pos;
                 if response.clicked_by(egui::PointerButton::Primary) {
-                    self.imagestack.pos = (pos - 1) % total;
+                    self.imagestack.pos = (pos+total-self.step) % total;
                     ctx.request_repaint();
                 }
                 if response.clicked_by(egui::PointerButton::Secondary) {
-                    self.imagestack.pos = (pos + 1) % total;
+                    self.imagestack.pos = (pos + self.step) % total;
                     ctx.request_repaint();
                 }
 
