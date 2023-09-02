@@ -11,10 +11,12 @@ mod font;
 mod imagestack;
 mod process;
 mod roi;
+mod toggle;
 
 #[cfg(target_arch = "wasm32")]
 use pollster::FutureExt as _;
 
+type Cache = Option<(usize, image::ImageBuffer<image::Rgba<u8>, Vec<u8>>)>;
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
@@ -32,7 +34,7 @@ pub struct Subtractor {
     #[serde(skip)]
     end: usize,
     #[serde(skip)]
-    step:usize,
+    step: usize,
 
     #[serde(skip)]
     image: Option<imagestack::Image>,
@@ -41,6 +43,12 @@ pub struct Subtractor {
     #[serde(skip)]
     progress_rx: Option<std::sync::mpsc::Receiver<(usize, usize)>>,
     counter: usize,
+
+    #[serde(skip)]
+    is_alive: bool,
+
+    #[serde(skip)]
+    cache: Arc<Cache>,
 }
 
 fn configure_text_styles(ctx: &egui::Context) {
@@ -117,57 +125,57 @@ impl Subtractor {
     fn show_image(&mut self, ui: &mut egui::Ui) {
         match self.imagestack.get_current_images() {
             (None, None) => eprintln!("No image in stack"),
-            (Some(im_path), None) => {
-                let mut im = image::open(im_path).expect("fail to open image").to_rgba8();
-                self.roicol.draw_rois(&mut im);
-                let size = [im.width() as usize, im.height() as usize];
-                let texture = ui.ctx().load_texture(
-                    format!("{}", self.imagestack.pos),
-                    egui::ColorImage::from_rgba_unmultiplied(size, im.to_vec().as_slice()),
-                    Default::default(),
-                );
+            (Some(im_path), None) => match self.cache.as_ref() {
+                Some((pos, _)) if *pos == self.imagestack.pos => (),
+                _ => {
+                    let im = image::open(im_path).expect("fail to open image").to_rgba8();
+                    self.cache = Arc::new(Some((self.imagestack.pos, im)));
+                }
+            },
+            (pre, Some(im_path)) => match self.cache.as_ref() {
+                Some((pos, _)) if *pos == self.imagestack.pos => (),
+                _ => {
+                    let im = match (self.show_subtract, pre) {
+                        (true, Some(pre)) => {
+                            let sub =
+                                process::subtract(pre, im_path).expect("fail to to open image");
 
-                self.image.replace(imagestack::Image {
-                    size,
-                    texture_id: Some(texture),
-                });
-            }
-            (pre, Some(im_path)) => {
-                let mut im = match (self.show_subtract, pre) {
-                    (true, Some(pre)) => {
-                        let sub = process::subtract(pre, im_path).expect("fail to to open image");
+                            let thresh = (128.0f64 - self.threshold * 12.8f64)
+                                .clamp(0f64, 255f64)
+                                .round() as usize;
+                            let mut im: image::ImageBuffer<image::Rgba<u8>, Vec<u8>> =
+                                image::ImageBuffer::new(sub.width(), sub.height());
+                            let mut rlut: [[u8; 4]; 256] = [[255; 4]; 256];
+                            (0..=255u8).for_each(|val| rlut[val as usize] = [val, val, val, 255]);
+                            (0..=thresh).for_each(|idx| rlut[idx][0] = 255);
+                            im.chunks_exact_mut(4).zip(sub.iter().cloned()).for_each(
+                                |(dst, src)| {
+                                    dst.copy_from_slice(rlut[src as usize].as_slice());
+                                },
+                            );
+                            im
+                        }
+                        (_, _) => image::open(im_path).expect("fail to open image").to_rgba8(),
+                    };
+                    self.cache = Arc::new(Some((self.imagestack.pos, im)));
+                }
+            },
+        };
 
-                        let thresh = (128.0f64 - self.threshold * 12.8f64)
-                            .clamp(0f64, 255f64)
-                            .round() as usize;
-                        let mut im: image::ImageBuffer<image::Rgba<u8>, Vec<u8>> =
-                            image::ImageBuffer::new(sub.width(), sub.height());
-                        let mut rlut: [[u8; 4]; 256] = [[255; 4]; 256];
-                        (0..=255u8).for_each(|val| rlut[val as usize] = [val, val, val, 255]);
-                        (0..=thresh).for_each(|idx| rlut[idx][0] = 255);
-                        im.chunks_exact_mut(4)
-                            .zip(sub.iter().cloned())
-                            .for_each(|(dst, src)| {
-                                dst.copy_from_slice(rlut[src as usize].as_slice());
-                            });
-                        im
-                    }
-                    (_, _) => image::open(im_path).expect("fail to open image").to_rgba8(),
-                };
+        if let Some((_, im)) = self.cache.as_ref() {
+            let mut im = im.clone();
+            self.roicol.draw_rois(&mut im);
+            let size = [im.width() as usize, im.height() as usize];
+            let texture = ui.ctx().load_texture(
+                format!("{}", self.imagestack.pos),
+                egui::ColorImage::from_rgba_unmultiplied(size, im.to_vec().as_slice()),
+                Default::default(),
+            );
 
-                self.roicol.draw_rois(&mut im);
-                let size = [im.width() as usize, im.height() as usize];
-                let texture = ui.ctx().load_texture(
-                    format!("{}", self.imagestack.pos),
-                    egui::ColorImage::from_rgba_unmultiplied(size, im.to_vec().as_slice()),
-                    Default::default(),
-                );
-
-                self.image.replace(imagestack::Image {
-                    size,
-                    texture_id: Some(texture),
-                });
-            }
+            self.image.replace(imagestack::Image {
+                size,
+                texture_id: Some(texture),
+            });
         }
     }
 }
@@ -192,6 +200,9 @@ impl eframe::App for Subtractor {
             if ui.add(slider).changed() {
                 self.show_image(ui);
             }
+
+            ui.label("Live:");
+            ui.add(toggle::toggle(&mut self.is_alive));
         });
 
         TopBottomPanel::bottom("progress_bar").show(ctx, |ui| {
@@ -319,9 +330,10 @@ impl eframe::App for Subtractor {
                     &mut self.show_subtract,
                     "show subtract",
                 ))
-                .changed()
-            {
+                .changed(){
+                self.cache = Arc::new(None);
                 self.show_image(ui);
+                ctx.request_repaint();
             }
 
             // show subtract
@@ -368,11 +380,7 @@ impl eframe::App for Subtractor {
                     let _step = self.step;
                     let _start = std::cmp::min(self.start, self.end).saturating_sub(_step);
                     let _end = std::cmp::max(self.end, self.start);
-
-
                     let home = homedir.to_string();
-                      
-                        
                     let images = Arc::clone(&self.imagestack.stacks);
                     let roicol_str = serde_json::to_string(&self.roicol)
                         .expect("fail to serialze RoiCollection");
@@ -393,7 +401,7 @@ impl eframe::App for Subtractor {
                             .num_threads(num_cpus::get().saturating_sub(2) + 1)
                             .build()
                             .expect("Fail to build rayon threadpool");
-                        
+
                         let res_sort = pool.install(|| {
                             let mut res_sort: Vec<(usize, Vec<u32>)> = (_start.._end)
                                 .into_par_iter()
@@ -449,16 +457,19 @@ impl eframe::App for Subtractor {
                 let response = ui.add(widgets::ImageButton::new(texture, texture.size_vec2()));
                 let total = self.imagestack.stacks.len();
                 let pos = self.imagestack.pos;
+                if self.is_alive {
+                    self.imagestack.pos = (pos + 1) % total;
+                }
                 if response.clicked_by(egui::PointerButton::Primary) {
-                    self.imagestack.pos = (pos+total-self.step) % total;
-                    ctx.request_repaint();
+                    self.imagestack.pos = (pos + total - self.step) % total;
                 }
                 if response.clicked_by(egui::PointerButton::Secondary) {
                     self.imagestack.pos = (pos + self.step) % total;
+                }
+                if self.imagestack.pos != pos {
+                    self.show_image(ui);
                     ctx.request_repaint();
                 }
-
-                self.show_image(ui);
             };
         });
     }

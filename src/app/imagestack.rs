@@ -1,8 +1,7 @@
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use eframe::egui;
 use rayon::slice::ParallelSliceMut;
-
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 #[derive(serde::Serialize, serde::Deserialize, Default)]
 pub struct Image {
@@ -32,7 +31,8 @@ impl<P: AsRef<Path>> ImageStack<P> {
                 let pattern = homedir.as_ref().join("*.jpg").display().to_string();
                 glob::glob(&pattern)
                     .map(|paths| {
-                        let stacks = Arc::get_mut(&mut self.stacks).expect("fail to retrieve mutable stack");
+                        let stacks =
+                            Arc::get_mut(&mut self.stacks).expect("fail to retrieve mutable stack");
                         stacks.extend(paths.filter_map(|p| p.ok()));
                         stacks.par_sort_unstable();
                     })
