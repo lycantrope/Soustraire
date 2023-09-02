@@ -1,10 +1,9 @@
-use std::time::{Duration, Instant};
-
 use eframe::egui;
 use eframe::egui::{widgets, CentralPanel, SidePanel, TopBottomPanel};
 use egui::{FontFamily, FontId, TextStyle};
 use poll_promise::Promise;
 use rayon::prelude::*;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 mod font;
@@ -39,10 +38,12 @@ pub struct Subtractor {
     #[serde(skip)]
     image: Option<imagestack::Image>,
     #[serde(skip)]
-    processing: Option<Promise<std::string::String>>,
+    processing: Option<Promise<()>>,
+
     #[serde(skip)]
-    progress_rx: Option<std::sync::mpsc::Receiver<(usize, usize)>>,
-    counter: usize,
+    progress_total: usize,
+    #[serde(skip)]
+    progress_count: Arc<AtomicUsize>,
 
     #[serde(skip)]
     is_alive: bool,
@@ -102,26 +103,6 @@ impl Subtractor {
         Default::default()
     }
 
-    fn get_progress(&mut self) -> (usize, usize) {
-        let default = (self.imagestack.pos, self.imagestack.len());
-        if let Some(rx) = &self.progress_rx {
-            let start = Instant::now();
-            loop {
-                if let Ok((_pos, total)) = rx.recv_timeout(Duration::from_millis(500)) {
-                    self.counter += 1;
-                    if start.elapsed() >= Duration::from_millis(16) {
-                        break (self.counter, total);
-                    }
-                } else {
-                    self.counter = default.0;
-                    break default;
-                }
-            }
-        } else {
-            self.counter = default.0;
-            default
-        }
-    }
     fn show_image(&mut self, ui: &mut egui::Ui) {
         match self.imagestack.get_current_images() {
             (None, None) => eprintln!("No image in stack"),
@@ -206,7 +187,14 @@ impl eframe::App for Subtractor {
         });
 
         TopBottomPanel::bottom("progress_bar").show(ctx, |ui| {
-            let (pos, total) = self.get_progress();
+            let (pos, total) = if self.processing.is_some() {
+                (
+                    self.progress_count.load(Ordering::Relaxed),
+                    self.progress_total,
+                )
+            } else {
+                (self.imagestack.pos, self.imagestack.len())
+            };
             ui.label(format!("{}/{}", pos, total));
             if let Some(promise) = self.processing.as_ref() {
                 match promise.ready() {
@@ -217,8 +205,7 @@ impl eframe::App for Subtractor {
                             .animate(true);
                         ui.add(progress_bar);
                     }
-                    Some(_home) => {
-                        self.progress_rx.take();
+                    Some(_) => {
                         self.processing.take();
                     }
                 }
@@ -365,7 +352,6 @@ impl eframe::App for Subtractor {
             ui.separator();
             if let Some(homedir) = &self.imagestack.homedir {
                 self.roicol.update_rois();
-
                 if self.processing.is_some() {
                     ui.label(format!("Processing the data in: {}", homedir.to_owned()));
                 } else if self.imagestack.max_slice() <= self.step{
@@ -373,9 +359,8 @@ impl eframe::App for Subtractor {
                 } else if ui.add(widgets::Button::new("Start\nProcess")).clicked() {
                     let roi_path = std::path::Path::new(homedir).join("Roi.json");
                     self.roicol.to_json(roi_path).expect("fail to write Roi");
-                    self.counter = 0;
-                    let (tx, rx) = std::sync::mpsc::channel();
-                    self.progress_rx.replace(rx);
+                    
+
                     let threshold = self.threshold;
                     let _step = self.step;
                     let _start = std::cmp::min(self.start, self.end).saturating_sub(_step);
@@ -384,6 +369,12 @@ impl eframe::App for Subtractor {
                     let images = Arc::clone(&self.imagestack.stacks);
                     let roicol_str = serde_json::to_string(&self.roicol)
                         .expect("fail to serialze RoiCollection");
+
+                    self.progress_total = (_end-_step)/_step;
+                    let chunksize = self.progress_total/10;
+                    
+                    self.progress_count.store(0, Ordering::SeqCst);
+                    let count = Arc::clone(&self.progress_count);
 
                     let promise = poll_promise::Promise::spawn_thread("processing", move || {
                         let csv_path = std::path::Path::new(&home).join("Area.csv");
@@ -401,12 +392,14 @@ impl eframe::App for Subtractor {
                             .num_threads(num_cpus::get().saturating_sub(2) + 1)
                             .build()
                             .expect("Fail to build rayon threadpool");
-
+                        
+                        
                         let res_sort = pool.install(|| {
                             let mut res_sort: Vec<(usize, Vec<u32>)> = (_start.._end)
                                 .into_par_iter()
                                 .step_by(_step)
                                 .enumerate()
+                                .with_min_len(chunksize)
                                 .filter_map(|(pos, idx)|{
                                         if let (Some(im1), Some(im2)) = (&images.get(idx), &images.get(idx+_step)){
                                             Some((pos, *im1, *im2))
@@ -414,19 +407,14 @@ impl eframe::App for Subtractor {
                                             None
                                         }
                                 })
-                                .map_with(tx, |tx, (pos, im1_p, im2_p)| {
-                                    let subimg = process::subtract(im1_p, im2_p)
-                                        .expect("failed to subtract the image");
+                                .map_with(count,|count, (pos, im1, im2)|{
+                                    let subimg = process::subtract(im1, im2)
+                                    .expect("failed to subtract the image");
 
                                     let res = roicol
                                         .measure_all(&subimg, threshold)
                                         .expect("fail to measure Roi");
-
-                                    loop {
-                                        if let Ok(()) = tx.send((pos, (_end - _start)/_step)) {
-                                            break;
-                                        };
-                                    }
+                                        count.fetch_add(1, Ordering::SeqCst);
                                     (pos, res)
                                 })
                                 .collect();
@@ -437,8 +425,7 @@ impl eframe::App for Subtractor {
                         res_sort.into_iter().for_each(|record| {
                             writer.serialize(record.1).expect("");
                         });
-                        writer.flush().expect("fail to flush the writer");
-                        home
+                        writer.flush().expect("fail to flush the writer");  
                     });
                     self.processing = Some(promise);
                 }
