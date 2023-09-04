@@ -400,24 +400,25 @@ impl eframe::App for Subtractor {
                                 .step_by(_step)
                                 .enumerate()
                                 .with_min_len(chunksize)
-                                .filter_map(|(pos, idx)|{
-                                        if let (Some(im1), Some(im2)) = (&images.get(idx), &images.get(idx+_step)){
-                                            Some((pos, *im1, *im2))
-                                        } else{
-                                            None
-                                        }
-                                })
-                                .map_with(count,|count, (pos, im1, im2)|{
-                                    let subimg = process::subtract(im1, im2)
-                                    .expect("failed to subtract the image");
+                                .fold(||Vec::with_capacity(chunksize), |mut acc, (pos,idx)|{
+                                    if let (Some(im1), Some(im2)) = (&images.get(idx), &images.get(idx+_step)){
+                                        let subimg = process::subtract(im1, im2)
+                                        .expect("failed to subtract the image");
 
-                                    let res = roicol
-                                        .measure_all(&subimg, threshold)
-                                        .expect("fail to measure Roi");
-                                        count.fetch_add(1, Ordering::SeqCst);
-                                    (pos, res)
-                                })
-                                .collect();
+                                        let res = roicol
+                                            .measure_all(&subimg, threshold)
+                                            .expect("fail to measure Roi");
+                                            count.fetch_add(1, Ordering::SeqCst);
+                                        acc.push((pos, res));
+                                        acc
+                                    }else{
+                                        acc
+                                    }
+
+                                }).reduce(||Vec::with_capacity((_end-_step)/_step+10), |mut acc, sub| {
+                                    acc.extend(sub.into_iter());
+                                    acc
+                                });
                             res_sort.par_sort_unstable_by(|a, b| a.0.cmp(&b.0));
                             res_sort
                         });
