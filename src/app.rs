@@ -3,6 +3,7 @@ use eframe::egui::{widgets, CentralPanel, SidePanel, TopBottomPanel};
 use egui::{FontFamily, FontId, TextStyle};
 use poll_promise::Promise;
 use rayon::prelude::*;
+use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -12,9 +13,6 @@ mod process;
 mod roi;
 mod toggle;
 
-#[cfg(target_arch = "wasm32")]
-use pollster::FutureExt as _;
-
 type Cache = Option<(usize, image::ImageBuffer<image::Rgba<u8>, Vec<u8>>)>;
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -22,7 +20,6 @@ type Cache = Option<(usize, image::ImageBuffer<image::Rgba<u8>, Vec<u8>>)>;
 #[derive(Default)]
 pub struct Subtractor {
     imagestack: imagestack::ImageStack<String>,
-    picked_path: Option<String>,
     roicol: roi::RoiCollection,
 
     show_subtract: bool,
@@ -104,7 +101,7 @@ impl Subtractor {
     }
 
     fn show_image(&mut self, ui: &mut egui::Ui) {
-        match self.imagestack.get_current_images() {
+        match self.imagestack.get_current_images(self.step) {
             (None, None) => eprintln!("No image in stack"),
             (Some(im_path), None) => match self.cache.as_ref() {
                 Some((pos, _)) if *pos == self.imagestack.pos => (),
@@ -159,6 +156,79 @@ impl Subtractor {
             });
         }
     }
+
+    fn spawn_a_process(&mut self) -> Promise<()> {
+        let homedir = self
+            .imagestack
+            .homedir
+            .as_ref()
+            .expect("homedir should be not None while call this function");
+        let mut roicol = self.roicol.clone();
+        roicol.update_rois();
+
+        let roi_path = Path::new(homedir).join("Roi.json");
+        roicol.to_json(roi_path).expect("fail to write Roi.json");
+
+        let csv_path = Path::new(homedir).join("Area.csv");
+        let mut writer = csv::Writer::from_path(csv_path).expect("fail to create Area.csv");
+        writer
+            .write_record(&csv::StringRecord::from(vec!["Area"; roicol.len()]))
+            .expect("fail to write csv header");
+
+        let threshold = self.threshold;
+        let _start = std::cmp::min(self.start, self.end).saturating_sub(self.step);
+        let _end = std::cmp::max(self.end, self.start);
+        let _step = self.step;
+
+        let images = self
+            .imagestack
+            .get_stacks()
+            .expect("the stacks are guarantee non-empty");
+
+        let n_thread = num_cpus::get().saturating_sub(1).max(1);
+
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(n_thread)
+            .build()
+            .expect("Fail to build rayon threadpool");
+
+        self.progress_total = (_end - _start) / _step;
+        self.progress_count.store(0, Ordering::SeqCst);
+        let count = Arc::clone(&self.progress_count);
+
+        poll_promise::Promise::spawn_thread("processing", move || {
+            let res_sort = pool.install(|| {
+                let mut res_sort: Vec<(usize, Vec<u32>)> = (_start.._end)
+                    .into_par_iter()
+                    .step_by(_step)
+                    .enumerate()
+                    // .with_min_len(chunksize)
+                    .filter_map(|(pos, idx)| {
+                        if let (Some(im1), Some(im2)) = (&images.get(idx), &images.get(idx + _step))
+                        {
+                            let subimg =
+                                process::subtract(im1, im2).expect("failed to subtract the image");
+
+                            let res = roicol
+                                .measure_all(&subimg, threshold)
+                                .expect("fail to measure Roi");
+                            count.fetch_add(1, Ordering::SeqCst);
+                            Some((pos, res))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                res_sort.par_sort_unstable_by(|a, b| a.0.cmp(&b.0));
+                res_sort
+            });
+
+            res_sort.into_iter().for_each(|(_, area)| {
+                writer.serialize(area).expect("");
+            });
+            writer.flush().expect("fail to flush the writer");
+        })
+    }
 }
 
 impl eframe::App for Subtractor {
@@ -175,15 +245,15 @@ impl eframe::App for Subtractor {
         TopBottomPanel::top("slider").show(ctx, |ui| {
             let max_frame = self.imagestack.max_slice();
             let slider = widgets::Slider::new(&mut self.imagestack.pos, 0..=max_frame)
+                .show_value(true)
                 .text("pos")
                 .clamp_to_range(true)
-                .trailing_fill(true);
+                .trailing_fill(true)
+                .step_by(1.0);
+
             if ui.add(slider).changed() {
                 self.show_image(ui);
             }
-
-            ui.label("Live:");
-            ui.add(toggle::toggle(&mut self.is_alive));
         });
 
         TopBottomPanel::bottom("progress_bar").show(ctx, |ui| {
@@ -213,56 +283,36 @@ impl eframe::App for Subtractor {
         });
 
         SidePanel::left("control").show(ctx, |ui| {
-            if self.processing.as_ref().is_none() && ui.button("Open data folder").clicked() {
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    let start_folder = self
-                        .imagestack
-                        .homedir
-                        .as_ref()
-                        .cloned()
-                        .or_else(|| dirs::home_dir().map(|v| v.display().to_string()))
-                        .expect("fail to set your home directory");
-                    if let Some(path) = rfd::FileDialog::new()
-                        .set_directory(start_folder)
-                        .pick_folder()
-                    {
-                        self.picked_path = Some(path.display().to_string());
-                        self.imagestack.set_homedir(path.display().to_string());
-                        match std::fs::File::open(path.join("Roi.json")) {
-                            Ok(fs) => {
-                                let rdr = std::io::BufReader::new(fs);
-                                self.roicol = serde_json::from_reader(rdr).unwrap_or_default();
-                            }
-                            Err(e) => eprintln!("json was not exists:{}", e),
-                        }
-                        self.start = 0;
-                        self.end = self.imagestack.max_slice();
-                        self.roicol.update_rois();
-                    }
-                    ctx.request_repaint();
-                }
+            ui.label("Live");
+            ui.add(toggle::toggle(&mut self.is_alive));
+            ui.add_space(8.0);
+            if self.processing.as_ref().is_none() && ui.add(egui::widgets::Button::new("Open data folder").min_size([75., 50.].into())).clicked() {
 
-                #[cfg(target_arch = "wasm32")]
-                {
-                    let f = async { rfd::AsyncFileDialog::new().pick_files().await };
-                    if let Some(files) = f.block_on() {
-                        self.picked_path = path.parent();
-                        self.picked_path = Some(path.display().to_string());
-                        self.imagestack.set_homedir(path.display().to_string());
-                        match std::fs::File::open(path.join("Roi.json")) {
-                            Ok(fs) => {
-                                let rdr = std::io::BufReader::new(fs);
-                                self.roicol = serde_json::from_reader(rdr).unwrap_or_default();
-                            }
-                            Err(e) => eprintln!("json was not exists:{}", e),
-                        }
-                        self.roicol.update_rois();
-                    }
-                }
+                let start_folder = self
+                    .imagestack
+                    .homedir
+                    .as_ref()
+                    .cloned()
+                    .or_else(|| dirs::home_dir().map(|v| v.display().to_string()))
+                    .expect("fail to set your home directory");
 
-                // self.show_image(ui);
-                self.show_image(ui);
+                if let Some(path) = rfd::FileDialog::new()
+                    .set_directory(start_folder)
+                    .pick_folder()
+                {
+                    self.imagestack.set_homedir(path.display().to_string());
+                    match std::fs::File::open(path.join("Roi.json")){
+                        Ok(fs) => {
+                            let rdr = std::io::BufReader::new(fs);
+                            self.roicol = serde_json::from_reader(rdr).unwrap_or_default();
+                        }
+                        Err(e) => eprintln!("json was not exists:{}", e),
+                    }
+                    self.start = 0;
+                    self.end = self.imagestack.max_slice();
+                    self.roicol.update_rois();
+                    self.show_image(ui);
+                }
             }
 
             let mut max_width = u32::MAX;
@@ -289,15 +339,15 @@ impl eframe::App for Subtractor {
                 "Rotate",
             ];
             let rois_widgets: Vec<widgets::DragValue<'_>> = vec![
-                widgets::DragValue::new(&mut self.roicol.ncol).clamp_range(0..=100),
-                widgets::DragValue::new(&mut self.roicol.nrow).clamp_range(0..=100),
-                widgets::DragValue::new(&mut self.roicol.x).clamp_range(0..=max_width),
-                widgets::DragValue::new(&mut self.roicol.y).clamp_range(0..=max_height),
-                widgets::DragValue::new(&mut self.roicol.xinterval).clamp_range(0..=max_width),
-                widgets::DragValue::new(&mut self.roicol.yinterval).clamp_range(0..=max_height),
-                widgets::DragValue::new(&mut self.roicol.width).clamp_range(0..=max_width),
-                widgets::DragValue::new(&mut self.roicol.height).clamp_range(0..=max_height),
-                widgets::DragValue::new(&mut self.roicol.rotate).clamp_range((-90.)..=90.),
+                widgets::DragValue::new(&mut self.roicol.ncol).suffix(" cols").clamp_range(0..=100),
+                widgets::DragValue::new(&mut self.roicol.nrow).suffix(" rows").clamp_range(0..=100),
+                widgets::DragValue::new(&mut self.roicol.x).suffix(" px").clamp_range(0..=max_width),
+                widgets::DragValue::new(&mut self.roicol.y).suffix(" px").clamp_range(0..=max_height),
+                widgets::DragValue::new(&mut self.roicol.xinterval).suffix(" px").clamp_range(0..=max_width),
+                widgets::DragValue::new(&mut self.roicol.yinterval).suffix(" px").clamp_range(0..=max_height),
+                widgets::DragValue::new(&mut self.roicol.width).suffix(" px").clamp_range(0..=max_width),
+                widgets::DragValue::new(&mut self.roicol.height).suffix(" px").clamp_range(0..=max_height),
+                widgets::DragValue::new(&mut self.roicol.rotate).suffix(" °").clamp_range((-90.)..=90.),
             ];
 
             if roi_labels.into_iter().zip(rois_widgets.into_iter()).fold(
@@ -351,83 +401,12 @@ impl eframe::App for Subtractor {
 
             ui.separator();
             if let Some(homedir) = &self.imagestack.homedir {
-                self.roicol.update_rois();
                 if self.processing.is_some() {
                     ui.label(format!("Processing the data in: {}", homedir.to_owned()));
                 } else if self.imagestack.max_slice() <= self.step{
                     ui.label("Cannot processing the imagestack if step size is greater than total frame!!");
                 } else if ui.add(widgets::Button::new("Start\nProcess")).clicked() {
-                    let roi_path = std::path::Path::new(homedir).join("Roi.json");
-                    self.roicol.to_json(roi_path).expect("fail to write Roi");
-                    
-
-                    let threshold = self.threshold;
-                    let _step = self.step;
-                    let _start = std::cmp::min(self.start, self.end).saturating_sub(_step);
-                    let _end = std::cmp::max(self.end, self.start);
-                    let home = homedir.to_string();
-                    let images = Arc::clone(&self.imagestack.stacks);
-                    let roicol_str = serde_json::to_string(&self.roicol)
-                        .expect("fail to serialze RoiCollection");
-
-                    self.progress_total = (_end-_step)/_step;
-                    let chunksize = self.progress_total/10;
-                    
-                    self.progress_count.store(0, Ordering::SeqCst);
-                    let count = Arc::clone(&self.progress_count);
-
-                    let promise = poll_promise::Promise::spawn_thread("processing", move || {
-                        let csv_path = std::path::Path::new(&home).join("Area.csv");
-                        let mut writer =
-                            csv::Writer::from_path(csv_path).expect("fail to create file");
-
-                        let mut roicol: roi::RoiCollection = serde_json::from_str(&roicol_str)
-                            .expect("Fail to parser RoiCollections");
-                        roicol.update_rois();
-
-                        writer
-                            .write_record(&csv::StringRecord::from(vec!["Area"; roicol.len()]))
-                            .expect("fail to write csv");
-                        let pool = rayon::ThreadPoolBuilder::new()
-                            .num_threads(num_cpus::get().saturating_sub(2) + 1)
-                            .build()
-                            .expect("Fail to build rayon threadpool");
-                        
-                        
-                        let res_sort = pool.install(|| {
-                            let mut res_sort: Vec<(usize, Vec<u32>)> = (_start.._end)
-                                .into_par_iter()
-                                .step_by(_step)
-                                .enumerate()
-                                .with_min_len(chunksize)
-                                .fold(||Vec::with_capacity(chunksize), |mut acc, (pos,idx)|{
-                                    if let (Some(im1), Some(im2)) = (&images.get(idx), &images.get(idx+_step)){
-                                        let subimg = process::subtract(im1, im2)
-                                        .expect("failed to subtract the image");
-
-                                        let res = roicol
-                                            .measure_all(&subimg, threshold)
-                                            .expect("fail to measure Roi");
-                                            count.fetch_add(1, Ordering::SeqCst);
-                                        acc.push((pos, res));
-                                        acc
-                                    }else{
-                                        acc
-                                    }
-
-                                }).reduce(||Vec::with_capacity((_end-_step)/_step+10), |mut acc, sub| {
-                                    acc.extend(sub.into_iter());
-                                    acc
-                                });
-                            res_sort.par_sort_unstable_by(|a, b| a.0.cmp(&b.0));
-                            res_sort
-                        });
-
-                        res_sort.into_iter().for_each(|record| {
-                            writer.serialize(record.1).expect("");
-                        });
-                        writer.flush().expect("fail to flush the writer");  
-                    });
+                    let promise = self.spawn_a_process();
                     self.processing = Some(promise);
                 }
             }
@@ -443,7 +422,7 @@ impl eframe::App for Subtractor {
                     )
                 });
                 let response = ui.add(widgets::ImageButton::new(texture, texture.size_vec2()));
-                let total = self.imagestack.stacks.len();
+                let total = self.imagestack.len();
                 let pos = self.imagestack.pos;
                 if self.is_alive {
                     self.imagestack.pos = (pos + 1) % total;
