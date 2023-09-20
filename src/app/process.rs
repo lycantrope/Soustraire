@@ -14,13 +14,9 @@ fn _imread<P: AsRef<Path>>(
     Ok(image::open(path)?.to_rgba8())
 }
 
-// /// Formats the sum of two numbers as string.
-pub fn subtract<P: AsRef<Path>>(
-    img1_path: P,
-    img2_path: P,
-) -> Result<ImageBuffer<Luma<u8>, Vec<u8>>, image::ImageError> {
-    let im1 = imread_as_gray(img1_path)?;
-    let im2 = imread_as_gray(img2_path)?;
+type GrayImage = ImageBuffer<Luma<u8>, Vec<u8>>;
+
+pub fn subtract_core(im1: &GrayImage, im2: &GrayImage) -> GrayImage {
     let width = im1.width();
     let height = im1.height();
 
@@ -67,6 +63,15 @@ pub fn subtract<P: AsRef<Path>>(
         .for_each(|(dst, src)| *dst = lut[(src + 255) as usize]);
 
     // radius = 2 is equivalent to k_size = 5,
-    let im_blur = filter::median_filter(&sub_norm, 2, 2);
-    Ok(im_blur)
+    filter::median_filter(&sub_norm, 2, 2)
+}
+
+// /// Formats the sum of two numbers as string.
+pub fn subtract<P: AsRef<Path>>(
+    img1_path: P,
+    img2_path: P,
+) -> Result<GrayImage, image::ImageError> {
+    let im1 = imread_as_gray(img1_path)?;
+    let im2 = imread_as_gray(img2_path)?;
+    Ok(subtract_core(&im1, &im2))
 }
