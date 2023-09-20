@@ -13,15 +13,14 @@ pub struct Image {
 #[derive(serde::Serialize, serde::Deserialize, Default)]
 pub struct ImageStack<P: AsRef<Path>> {
     pub homedir: Option<P>,
-    #[serde(skip)]
-    pub stacks: Arc<Vec<PathBuf>>,
     pub pos: usize,
+    #[serde(skip)]
+    pub stacks: Option<Arc<[PathBuf]>>,
 }
 
 impl<P: AsRef<Path>> ImageStack<P> {
     pub fn set_homedir(&mut self, homedir: P) -> bool {
         self.homedir = Some(homedir);
-        self.stacks = Arc::new(Vec::new());
         self.glob()
     }
     fn glob(&mut self) -> bool {
@@ -29,26 +28,35 @@ impl<P: AsRef<Path>> ImageStack<P> {
             .as_ref()
             .and_then(|homedir| {
                 let pattern = homedir.as_ref().join("*.jpg").display().to_string();
+
                 glob::glob(&pattern)
                     .map(|paths| {
-                        let stacks =
-                            Arc::get_mut(&mut self.stacks).expect("fail to retrieve mutable stack");
-                        stacks.extend(paths.filter_map(|p| p.ok()));
-                        stacks.par_sort_unstable();
+                        let mut paths: Vec<PathBuf> = paths.filter_map(|p| p.ok()).collect();
+                        paths.par_sort_unstable();
+                        self.stacks.replace(paths.into());
                     })
                     .ok()
             })
             .is_some()
     }
     pub fn len(&self) -> usize {
-        self.stacks.len()
+        self.stacks
+            .as_ref()
+            .map(|stacks| stacks.len())
+            .unwrap_or(0)
     }
 
     pub fn max_slice(&self) -> usize {
-        self.stacks.len().saturating_sub(1)
+        self.len().saturating_sub(1)
+    }
+    pub fn get_stacks(&self) -> Option<Arc<[PathBuf]>> {
+        self.stacks.as_ref().map(Arc::clone)
     }
 
-    pub fn get_current_images(&self) -> (Option<&PathBuf>, Option<&PathBuf>) {
-        (self.stacks.get(self.pos - 1), self.stacks.get(self.pos))
+    pub fn get_current_images(&self, step: usize) -> (Option<&PathBuf>, Option<&PathBuf>) {
+        self.stacks
+            .as_ref()
+            .map(|stacks| (stacks.get(self.pos - step), stacks.get(self.pos)))
+            .unwrap_or_default()
     }
 }
