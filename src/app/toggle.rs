@@ -1,5 +1,5 @@
 fn toggle_ui_compact(ui: &mut egui::Ui, on: &mut bool) -> egui::Response {
-    let desired_size = ui.spacing().interact_size.y * egui::vec2(2.0, 1.0);
+    let desired_size = ui.spacing().interact_size.y * egui::vec2(3.0, 1.0);
     let (rect, mut response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
     if response.clicked() {
         *on = !*on;
@@ -17,7 +17,7 @@ fn toggle_ui_compact(ui: &mut egui::Ui, on: &mut bool) -> egui::Response {
         let circle_x = egui::lerp((rect.left() + radius)..=(rect.right() - radius), how_on);
         let center = egui::pos2(circle_x, rect.center().y);
         ui.painter()
-            .circle(center, 0.75 * radius, visuals.bg_fill, visuals.fg_stroke);
+            .circle(center, 0.66 * radius, visuals.bg_fill, visuals.fg_stroke);
     }
 
     response
