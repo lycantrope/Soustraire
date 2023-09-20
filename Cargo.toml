@@ -3,7 +3,7 @@ name = "soustraire"
 version = "0.1.0"
 authors = ["Chung-Kuan Chen <b97b01045@gmail.com>"]
 edition = "2021"
-rust-version = "1.69"
+rust-version = "1.72"
 
 
 [dependencies]
@@ -16,19 +16,19 @@ image = "0.24.6"
 imageproc = "0.23.0"
 rayon = "1.7.0"
 glob = "0.3.1"
-rfd = "0.11"
+rfd = "0.12.0"
 serde_json = "1.0.96"
-itertools = "0.10.5"
+itertools = "0.11.0"
 rusttype = "0.9.3"
 csv = "1.2.1"
-poll-promise = "0.2.0"
+poll-promise = "0.3.0"
 dirs = "5.0.1"
 num_cpus = "1.15.0"
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tracing-subscriber = "0.3"
-poll-promise = "0.2.0"
+poll-promise = "0.3.0"
 
 
 # web:
@@ -37,13 +37,14 @@ console_error_panic_hook = "0.1.6"
 tracing-wasm = "0.2"
 wasm-bindgen-futures = "0.4"
 pollster = "0.3.0"
-poll-promise = { version = "0.2.0", features = ["web"] }
+poll-promise = { version = "0.3.0", features = ["web"] }
 
 
 
 
 [profile.release]
 opt-level = 3 # fast and small wasm
+lto=true
 panic = "abort"
 
 # Optimize all dependencies even in debug builds:
