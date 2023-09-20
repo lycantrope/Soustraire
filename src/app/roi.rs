@@ -7,8 +7,9 @@ use itertools::iproduct;
 use rusttype::{Font, Scale};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use std::sync::Arc;
 
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default, Clone)]
 struct Roi {
     x: u32,
     y: u32,
@@ -69,7 +70,7 @@ impl Roi {
         )
     }
 }
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct RoiCollection {
     pub nrow: u32,
     pub ncol: u32,
@@ -81,7 +82,7 @@ pub struct RoiCollection {
     pub height: u32,
     pub rotate: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    rois: Option<Vec<Roi>>,
+    rois: Option<Arc<[Roi]>>,
 }
 
 impl std::default::Default for RoiCollection {
@@ -91,8 +92,8 @@ impl std::default::Default for RoiCollection {
             ncol: 8,
             x: 18,
             y: 20,
-            xinterval: 128,
-            yinterval: 125,
+            xinterval: 131,
+            yinterval: 131,
             width: 78,
             height: 78,
             rotate: 0.0,
@@ -140,7 +141,7 @@ impl RoiCollection {
             })
             .enumerate()
             .map(|(idx, roi)| roi.set_index(idx))
-            .collect::<Vec<Roi>>();
+            .collect::<Arc<[Roi]>>();
         self.rois = Some(rois);
     }
 
