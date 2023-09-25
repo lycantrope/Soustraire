@@ -243,17 +243,21 @@ impl eframe::App for Subtractor {
     /// Put your widgets into a `SidePanel`, `TopPanel`, `CentralPanel`, `Window` or `Area`.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         TopBottomPanel::top("slider").show(ctx, |ui| {
-            let max_frame = self.imagestack.max_slice();
-            let slider = widgets::Slider::new(&mut self.imagestack.pos, 0..=max_frame)
-                .show_value(true)
-                .text("pos")
-                .clamp_to_range(true)
-                .trailing_fill(true)
-                .step_by(1.0);
+            ui.horizontal(|ui| {
+                let max_frame = self.imagestack.max_slice();
+                ui.label("Live");
+                ui.add(toggle::toggle(&mut self.is_alive));
+                let slider = widgets::Slider::new(&mut self.imagestack.pos, 0..=max_frame)
+                    .show_value(true)
+                    .text("pos")
+                    .clamp_to_range(true)
+                    .trailing_fill(true)
+                    .step_by(1.0);
 
-            if ui.add(slider).changed() {
-                self.show_image(ui);
-            }
+                if ui.add(slider).changed() {
+                    self.show_image(ui);
+                }
+            });
         });
 
         TopBottomPanel::bottom("progress_bar").show(ctx, |ui| {
@@ -282,38 +286,38 @@ impl eframe::App for Subtractor {
             }
         });
 
-        SidePanel::left("control").show(ctx, |ui| {
-            ui.label("Live");
-            ui.add(toggle::toggle(&mut self.is_alive));
-            ui.add_space(8.0);
-            if self.processing.as_ref().is_none() && ui.add(egui::widgets::Button::new("Open data folder").min_size([75., 50.].into())).clicked() {
+        SidePanel::left("control").show(ctx, |ui| {            
+            ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                let proc_btn = egui::widgets::Button::new("Open Data Folder").min_size([128., 48.].into()).rounding(3.6);
+                if self.processing.as_ref().is_none() && ui.add(proc_btn).clicked() {
 
-                let start_folder = self
-                    .imagestack
-                    .homedir
-                    .as_ref()
-                    .cloned()
-                    .or_else(|| dirs::home_dir().map(|v| v.display().to_string()))
-                    .expect("fail to set your home directory");
+                    let start_folder = self
+                        .imagestack
+                        .homedir
+                        .as_ref()
+                        .cloned()
+                        .or_else(|| dirs::home_dir().map(|v| v.display().to_string()))
+                        .expect("fail to set your home directory");
 
-                if let Some(path) = rfd::FileDialog::new()
-                    .set_directory(start_folder)
-                    .pick_folder()
-                {
-                    self.imagestack.set_homedir(path.display().to_string());
-                    match std::fs::File::open(path.join("Roi.json")){
-                        Ok(fs) => {
-                            let rdr = std::io::BufReader::new(fs);
-                            self.roicol = serde_json::from_reader(rdr).unwrap_or_default();
+                    if let Some(path) = rfd::FileDialog::new()
+                        .set_directory(start_folder)
+                        .pick_folder()
+                    {
+                        self.imagestack.set_homedir(path.display().to_string());
+                        match std::fs::File::open(path.join("Roi.json")){
+                            Ok(fs) => {
+                                let rdr = std::io::BufReader::new(fs);
+                                self.roicol = serde_json::from_reader(rdr).unwrap_or_default();
+                            }
+                            Err(e) => eprintln!("json was not exists:{}", e),
                         }
-                        Err(e) => eprintln!("json was not exists:{}", e),
+                        self.start = 0;
+                        self.end = self.imagestack.max_slice();
+                        self.roicol.update_rois();
+                        self.show_image(ui);
                     }
-                    self.start = 0;
-                    self.end = self.imagestack.max_slice();
-                    self.roicol.update_rois();
-                    self.show_image(ui);
                 }
-            }
+            });
 
             let mut max_width = u32::MAX;
             let mut max_height = u32::MAX;
@@ -398,18 +402,19 @@ impl eframe::App for Subtractor {
             );
 
             // process block
-
             ui.separator();
-            if let Some(homedir) = &self.imagestack.homedir {
-                if self.processing.is_some() {
-                    ui.label(format!("Processing the data in: {}", homedir.to_owned()));
-                } else if self.imagestack.max_slice() <= self.step{
-                    ui.label("Cannot processing the imagestack if step size is greater than total frame!!");
-                } else if ui.add(widgets::Button::new("Start\nProcess")).clicked() {
-                    let promise = self.spawn_a_process();
-                    self.processing = Some(promise);
+            ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                if let Some(homedir) = &self.imagestack.homedir {
+                    if self.processing.is_some() {
+                        ui.label(format!("Processing the data in: {}", homedir.to_owned()));
+                    } else if self.imagestack.max_slice() <= self.step{
+                        ui.label("Cannot processing the imagestack if step size is greater than total frame!!");
+                    } else if ui.add(widgets::Button::new("Start Process").min_size([128., 48.].into()).rounding(3.6)).clicked() {
+                        let promise = self.spawn_a_process();
+                        self.processing = Some(promise);
+                    }
                 }
-            }
+            });
         });
         CentralPanel::default().show(ctx, |ui| {
             if let Some(im) = &mut self.image {

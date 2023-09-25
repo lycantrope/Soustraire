@@ -40,10 +40,7 @@ impl<P: AsRef<Path>> ImageStack<P> {
             .is_some()
     }
     pub fn len(&self) -> usize {
-        self.stacks
-            .as_ref()
-            .map(|stacks| stacks.len())
-            .unwrap_or(0)
+        self.stacks.as_ref().map(|stacks| stacks.len()).unwrap_or(0)
     }
 
     pub fn max_slice(&self) -> usize {
