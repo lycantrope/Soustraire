@@ -1,16 +1,20 @@
 # Soustraire is a Rust implementation for Remi imagesubtractor.
-**Warning** 
-> ** The poll-promise compiled with Rust 1.70 cause UB in promise.ready()**. Waiting for the fixed of poll-promise.   
-> Current application was failed to compile into WASM.
+
+
+## Overview
+![demo](./assets/demo.png)
+
+**Warning: This application did not support WASM.**
+
 ## How to install
-### 1. install [Rust](https://www.rust-lang.org/ja/tools/install)
+### 1. Install [Rust](https://www.rust-lang.org/ja/tools/install)
 - Windows
 Downloaded the Rust installer from [Rust](https://www.rust-lang.org/ja/tools/install)
 - MacOS/Linux
 ```shell
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
-### 2. clone [Soustraire](https://github.com/lycantrope/soustraire) repository
+### 2. Clone this repository [Soustraire](https://github.com/lycantrope/soustraire).
 
 ```shell
 git clone https://github.com/lycantrope/soustraire
@@ -20,19 +24,22 @@ git clone https://github.com/lycantrope/soustraire
 cargo run --release
 ```
 
-### 4. [Optional] Build with simd optiomization by LLVM (Intel AVX2/AVX-512)
+### 4. [Optional] Build with SIMD optiomization supported by LLVM (Intel AVX2/AVX-512)
 
 - MacOS/Linux
-```shell
-RUSTFLAGS='-C target-feature=+avx' cargo build --release
-```
-- Windows
-```powershell
-set RUSTFLAGS -C target-feature=+avx    
-```
-```
-cargo build --release
-```
+    ```bash
+    RUSTFLAGS='-C target-feature=+avx' cargo build --release
+    ```
+- Windows  
+  1. Set `RUSTFLAGS` to activate SIMD features. 
+    ```powershell
+    set RUSTFLAGS -C target-feature=+avx
+    ```
+  2. Build  
+    ```powershell
+    cargo build --release
+    ```
+
 ###
 ## Algorithm
 
