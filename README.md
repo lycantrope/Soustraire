@@ -2,6 +2,8 @@
 
 Soustraire is a Rust implementation for REMI imagesubtractor, designed to process and analyze image differences efficiently. This application allows users to subtract previous images from current ones, calculate differences, and analyze the results. Below is a detailed guide on how to install, build, and run Soustraire on your system.
 
+![demo](./assets/demo.png)
+
 ## Prerequisites
 - **Rust**: Ensure that Rust is installed on your system. If not, you can install it from [here](https://www.rust-lang.org/ja/tools/install).
 - **Naming**: Soustraire processes images based on lexicographical order. Ensure that your images are named in lexicographical order to maintain the correct subtraction sequence.
