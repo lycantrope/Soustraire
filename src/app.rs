@@ -381,11 +381,15 @@ impl eframe::App for Subtractor {
             let maxslice = self.imagestack.max_slice();
             ui.separator();
             ui.label("Binarized threshold (default: 2.0 x std)");
-            ui.add(
+            if ui.add(
                 widgets::DragValue::new(&mut self.threshold)
                     .min_decimals(1)
                     .clamp_range(-10.0..=10.0),
-            );
+            ).changed(){
+                self.cache = Arc::new(None);
+                self.show_image(ui);
+                ctx.request_repaint();
+            };
             ui.label("Start slice");
             ui.add(
                 widgets::DragValue::new(&mut self.start)
@@ -397,9 +401,13 @@ impl eframe::App for Subtractor {
             );
 
             ui.label("Frame step");
-            ui.add(
+            if ui.add(
                 widgets::DragValue::new(&mut self.step).clamp_range(1..=maxslice.saturating_sub(1).max(1)),
-            );
+            ).changed(){
+                self.cache = Arc::new(None);
+                self.show_image(ui);
+                ctx.request_repaint();
+            };
 
             // process block
             ui.separator();
