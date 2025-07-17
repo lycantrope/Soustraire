@@ -1,6 +1,7 @@
 use eframe::egui;
 use eframe::egui::{widgets, CentralPanel, SidePanel, TopBottomPanel};
 use egui::{FontFamily, FontId, TextStyle};
+
 use poll_promise::Promise;
 use rayon::prelude::*;
 use std::path::Path;
@@ -269,7 +270,7 @@ impl eframe::App for Subtractor {
             } else {
                 (self.imagestack.pos, self.imagestack.len())
             };
-            ui.label(format!("{}/{}", pos, total));
+            ui.label(format!("{pos}/{total}"));
             if let Some(promise) = self.processing.as_ref() {
                 match promise.ready() {
                     None => {
@@ -309,7 +310,7 @@ impl eframe::App for Subtractor {
                                 let rdr = std::io::BufReader::new(fs);
                                 self.roicol = serde_json::from_reader(rdr).unwrap_or_default();
                             }
-                            Err(e) => eprintln!("json was not exists:{}", e),
+                            Err(e) => eprintln!("json was not exists:{e}"),
                         }
                         self.start = 0;
                         self.end = self.imagestack.max_slice();

@@ -24,20 +24,25 @@ impl<P: AsRef<Path>> ImageStack<P> {
         self.glob()
     }
     fn glob(&mut self) -> bool {
-        self.homedir
-            .as_ref()
-            .and_then(|homedir| {
-                let pattern = homedir.as_ref().join("*.jpg").display().to_string();
+        let Some(homedir) = self.homedir.as_ref() else {
+            return false;
+        };
 
-                glob::glob(&pattern)
-                    .map(|paths| {
-                        let mut paths: Vec<PathBuf> = paths.filter_map(|p| p.ok()).collect();
-                        paths.par_sort_unstable();
-                        self.stacks.replace(paths.into());
-                    })
-                    .ok()
-            })
-            .is_some()
+        let suffixes = ["*.jpg", "*.tif"];
+        for pat in suffixes {
+            let pattern = homedir.as_ref().join(pat).display().to_string();
+            if let Ok(paths) = glob::glob(&pattern).map(|paths| {
+                let mut paths: Vec<PathBuf> = paths.filter_map(|p| p.ok()).collect();
+                paths.par_sort_unstable();
+                paths
+            }) {
+                if !paths.is_empty() {
+                    self.stacks.replace(paths.into());
+                    return true;
+                }
+            }
+        }
+        false
     }
     pub fn len(&self) -> usize {
         self.stacks.as_ref().map(|stacks| stacks.len()).unwrap_or(0)
@@ -53,7 +58,13 @@ impl<P: AsRef<Path>> ImageStack<P> {
     pub fn get_current_images(&self, step: usize) -> (Option<&PathBuf>, Option<&PathBuf>) {
         self.stacks
             .as_ref()
-            .map(|stacks| (stacks.get(self.pos - step), stacks.get(self.pos)))
+            .map(|stacks| {
+                if self.pos >= step {
+                    (stacks.get(self.pos - step), stacks.get(self.pos))
+                } else {
+                    (None, stacks.get(self.pos))
+                }
+            })
             .unwrap_or_default()
     }
 }

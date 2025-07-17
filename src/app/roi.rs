@@ -4,7 +4,6 @@ use super::font::ROBOTO_FNT;
 use image::{GenericImageView, ImageBuffer};
 use imageproc::drawing::{draw_hollow_rect_mut, draw_text_mut};
 use itertools::iproduct;
-use rusttype::{Font, Scale};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::Arc;
@@ -45,7 +44,11 @@ impl Roi {
             })
     }
 
-    fn draw_roi(&self, gray: &mut ImageBuffer<image::Rgba<u8>, Vec<u8>>, font: &Font<'_>) {
+    fn draw_roi(
+        &self,
+        gray: &mut ImageBuffer<image::Rgba<u8>, Vec<u8>>,
+        font: &impl ab_glyph::Font,
+    ) {
         let white = image::Rgba([255, 255, 0, 128]);
         draw_hollow_rect_mut(
             gray,
@@ -64,8 +67,8 @@ impl Roi {
             white,
             self.x as i32 - 15,
             self.y as i32 - 15,
-            Scale { x: 16.0, y: 16.0 },
-            font,
+            16.,
+            &font,
             &format!("{}", self.index),
         )
     }
@@ -109,11 +112,15 @@ impl RoiCollection {
         threshold: f64,
     ) -> Option<Vec<u32>> {
         let thresh = (127.0f64 - threshold * 12.8f64).clamp(0f64, 255f64).round() as u8;
-        let mut thres_im = imageproc::contrast::threshold(subimg, thresh);
+        let thres_im = imageproc::contrast::threshold(
+            subimg,
+            thresh,
+            imageproc::contrast::ThresholdType::BinaryInverted,
+        );
         // invert the byte;
-        thres_im.iter_mut().for_each(|pix| {
-            *pix = !*pix;
-        });
+        // thres_im.iter_mut().for_each(|pix| {
+        //     *pix = !*pix;
+        // });
 
         self.rois
             .as_ref()
@@ -146,7 +153,7 @@ impl RoiCollection {
     }
 
     pub fn draw_rois(&self, gray: &mut ImageBuffer<image::Rgba<u8>, Vec<u8>>) {
-        let font = Font::try_from_bytes(ROBOTO_FNT.as_ref()).unwrap();
+        let font = ab_glyph::FontArc::try_from_slice(ROBOTO_FNT.as_ref()).unwrap();
 
         if let Some(rois) = self.rois.as_ref() {
             rois.iter().for_each(|roi| {
