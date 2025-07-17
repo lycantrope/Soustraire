@@ -59,11 +59,9 @@ impl<P: AsRef<Path>> ImageStack<P> {
         self.stacks
             .as_ref()
             .map(|stacks| {
-                if self.pos >= step {
-                    (stacks.get(self.pos - step), stacks.get(self.pos))
-                } else {
-                    (None, stacks.get(self.pos))
-                }
+                let cur = stacks.get(self.pos);
+                let prev = self.pos.checked_sub(step).and_then(|x| stacks.get(x));
+                (prev, cur)
             })
             .unwrap_or_default()
     }
