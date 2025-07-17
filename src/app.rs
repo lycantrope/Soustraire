@@ -26,6 +26,9 @@ pub struct Subtractor {
     show_subtract: bool,
 
     threshold: f64,
+
+    scale: f32,
+
     #[serde(skip)]
     start: usize,
     #[serde(skip)]
@@ -97,8 +100,10 @@ impl Subtractor {
         if let Some(storage) = cc.storage {
             return eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
         }
-
-        Default::default()
+        Self {
+            scale: 1.0,
+            ..Default::default()
+        }
     }
 
     fn show_image(&mut self, ui: &mut egui::Ui) {
@@ -248,6 +253,7 @@ impl eframe::App for Subtractor {
                 let max_frame = self.imagestack.max_slice();
                 ui.label("Live");
                 ui.add(toggle::toggle(&mut self.is_alive));
+                ui.separator();
                 let slider = widgets::Slider::new(&mut self.imagestack.pos, 0..=max_frame)
                     .show_value(true)
                     .text("pos")
@@ -257,6 +263,16 @@ impl eframe::App for Subtractor {
 
                 if ui.add(slider).changed() {
                     self.show_image(ui);
+                }
+                ui.separator();
+                let scale_bar = widgets::DragValue::new(&mut self.scale)
+                    .prefix("x ")
+                    .speed(0.1)
+                    .clamp_range((0.01)..=32.);
+                ui.add(scale_bar);
+
+                if (self.scale - 1.0).abs() > 0.01 && ui.button("Reset").clicked() {
+                    self.scale = 1.0;
                 }
             });
         });
@@ -435,7 +451,11 @@ impl eframe::App for Subtractor {
                         Default::default(),
                     )
                 });
-                let response = ui.add(widgets::ImageButton::new(texture, texture.size_vec2()));
+                let [w, h] = texture.size();
+                let response = ui.add(widgets::ImageButton::new(
+                    texture,
+                    [w as f32 * self.scale, h as f32 * self.scale],
+                ));
                 let total = self.imagestack.len();
                 let pos = self.imagestack.pos;
                 if self.is_alive {
@@ -447,6 +467,27 @@ impl eframe::App for Subtractor {
                 if response.clicked_by(egui::PointerButton::Secondary) {
                     self.imagestack.pos = (pos + self.step) % total;
                 }
+
+                if response.clicked_by(egui::PointerButton::Middle) {
+                    self.scale = 1.0;
+                }
+
+                if response.hovered() {
+                    let delta = ui.input(|i| {
+                        i.events.iter().find_map(|e| match e {
+                            egui::Event::MouseWheel {
+                                unit: _,
+                                delta,
+                                modifiers,
+                            } if modifiers.command_only() => Some(*delta),
+                            _ => None,
+                        })
+                    });
+                    if let Some(delta) = delta {
+                        self.scale += delta.y / 10.0
+                    }
+                }
+
                 if self.imagestack.pos != pos {
                     self.show_image(ui);
                     ctx.request_repaint();
